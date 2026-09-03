@@ -1,0 +1,42 @@
+[Unit]
+Description=KKk58 Vereinsdatenbank (Anschreibliste)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kkk58
+Group=kkk58
+WorkingDirectory=/opt/kkk58
+ExecStart=/usr/bin/node /opt/kkk58/server.js
+Restart=on-failure
+RestartSec=3
+
+# --- Konfiguration ---
+Environment=PORT=3000
+# NPMplus laeuft in einem SEPARATEN LXC -> App muss von aussen erreichbar sein.
+# 0.0.0.0 = alle Interfaces (einfach, funktioniert). Alternativ die konkrete
+# IP dieser App-LXC eintragen. Zugriff auf Port 3000 per Firewall auf den
+# NPM-LXC beschraenken (siehe README, Abschnitt 3).
+Environment=BIND=0.0.0.0
+Environment=BASE_PATH=/kkk58
+Environment=DATA_DIR=/opt/kkk58/data
+Environment=COOKIE_SECURE=true
+# Optional beim allerersten Start (sonst wird ein Zufallspasswort erzeugt
+# und in /opt/kkk58/data/INITIAL-ADMIN.txt geschrieben):
+# Environment=KKK_ADMIN_USER=admin
+# Environment=KKK_ADMIN_PASS=BitteAendern
+
+# --- Haertung ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/kkk58/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

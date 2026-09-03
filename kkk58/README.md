@@ -26,27 +26,27 @@ node --version || sudo apt update && sudo apt install -y nodejs
 #   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs
 
 # Dienstbenutzer + Zielverzeichnis
-useradd --system --home /opt/kkk58 --shell /usr/sbin/nologin kkk58
- mkdir -p /opt/kkk58
+sudo useradd --system --home /opt/kkk58 --shell /usr/sbin/nologin kkk58
+sudo mkdir -p /opt/kkk58
 
 # Projektdateien nach /opt/kkk58 kopieren (server.js, public/, package.json)
 # z.B. per scp das entpackte Verzeichnis, dann:
-cp -r server.js public package.json /opt/kkk58/
-mkdir -p /opt/kkk58/data
-chown -R kkk58:kkk58 /opt/kkk58
-chmod 750 /opt/kkk58/data
+sudo cp -r server.js public package.json /opt/kkk58/
+sudo mkdir -p /opt/kkk58/data
+sudo chown -R kkk58:kkk58 /opt/kkk58
+sudo chmod 750 /opt/kkk58/data
 ```
 
 ### Als systemd-Dienst starten
 
 ```bash
-ln -s /opt/kkk58/kkk58.service /etc/systemd/system/ 
-systemctl daemon-reload
-systemctl enable --now kkk58
+sudo cp /opt/kkk58/kkk58.service /etc/systemd/system/    # oder die mitgelieferte Datei
+sudo systemctl daemon-reload
+sudo systemctl enable --now kkk58
 
 # Log ansehen – hier steht beim ERSTEN Start das Admin-Passwort:
-journalctl -u kkk58 -n 30 --no-pager
-cat /opt/kkk58/data/INITIAL-ADMIN.txt
+sudo journalctl -u kkk58 -n 30 --no-pager
+sudo cat /opt/kkk58/data/INITIAL-ADMIN.txt
 ```
 
 > **Erst-Admin:** Ohne die Variablen `KKK_ADMIN_USER`/`KKK_ADMIN_PASS` erzeugt der

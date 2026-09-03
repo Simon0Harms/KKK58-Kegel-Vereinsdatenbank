@@ -1,0 +1,14 @@
+{
+  "name": "kkk58-vereinsdb",
+  "version": "1.0.0",
+  "description": "KKk58 Vereinsdatenbank – gemeinsame Anschreibliste mit Login und Live-Sync (ohne externe Abhängigkeiten)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true,
+  "license": "UNLICENSED"
+}
