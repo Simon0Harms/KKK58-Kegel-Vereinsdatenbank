@@ -628,7 +628,10 @@
   const tbody=$("tbody"), thead=$("thead");
   const medalCls=pl=>pl===1?"g":pl===2?"s":pl===3?"b":"none";
   function rebuildDatalist(){ const dl=$("rosterlist"); if(!dl)return;
-    dl.innerHTML=roster.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(r=>{
+    const players=(state&&state.players)?state.players:[];
+    const usedIds=new Set(players.map(p=>p.rosterId).filter(x=>x!=null));
+    const usedNames=new Set(players.map(p=>(p.name||'').toLowerCase()));
+    dl.innerHTML=roster.slice().filter(r=>!usedIds.has(r.id) && !usedNames.has(r.name.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)).map(r=>{
       const lab = r.active===false ? (esc(r.name)+' (inaktiv)') : esc(r.name);
       return '<option value="'+esc(r.name)+'" label="'+lab+'">';
     }).join(""); }
@@ -647,6 +650,7 @@
       ? state.players.slice().sort((a,b)=> total(b)-total(a) || (a.name||'').localeCompare(b.name||''))
       : state.players;
     rows.forEach(p=>tbody.appendChild(buildRow(p))); updateDerived();
+    rebuildDatalist();
     if(fkey){ const el=q('[data-fkey="'+cssq(fkey)+'"]'); if(el){ el.focus(); if(ss!=null){try{el.setSelectionRange(ss,se);}catch(_){}}}}
   }
   function buildHead(){
@@ -721,6 +725,7 @@
     }).join(""); $("paysum").textContent=euro(sum); }
   function updateFoot(){ let base='⑧ = Kränze · Ⓢ = meiste Punkte · Ⓟ = meiste Pumpen · Kasse: 9/Kranz zahlen die anderen, Pumpe selbst.';
     if(state&&state.updatedBy){ const d=state.updatedAt?new Date(state.updatedAt):null; base+=' — zuletzt geändert von '+esc(state.updatedBy)+(d?(' um '+d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})):''); }
+    base+=' · <a href="https://github.com/Simon0Harms/KKK58-Kegel-Vereinsdatenbank" target="_blank" rel="noopener noreferrer">Quellcode auf GitHub</a>';
     $("foot").innerHTML=base; }
 
   // ---------- Top-Eingaben ----------
