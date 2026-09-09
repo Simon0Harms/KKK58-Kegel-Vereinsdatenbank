@@ -185,8 +185,7 @@ def select_new(db, state):
     return new_log, new_ledger, markers
 
 
-def build_message(new_log, new_ledger, max_lines):
-    lines = [format_log_entry(e) for e in new_log] + [format_ledger_entry(e) for e in new_ledger]
+def build_message(lines, max_lines):
     if not lines:
         return None
     total = len(lines)
@@ -196,6 +195,38 @@ def build_message(new_log, new_ledger, max_lines):
         return head + "\n" + "\n".join(shown)
     head = f"🎳 KKk58 – {total} Änderung" + ("en" if total != 1 else "") + ":"
     return head + "\n" + "\n".join(lines)
+
+
+ROLE_DE = {"admin": "Admin", "kassenwart": "Kassenwart", "mitglied": "Mitglied", "beschraenkt": "beschränkt"}
+
+
+def _role_de(r):
+    return ROLE_DE.get(r, r or "?")
+
+
+def format_user_line(text):
+    return "• " + hhmm(int(time.time() * 1000)) + " · Konten: " + text
+
+
+def diff_users(prev_snap, current_users):
+    """Vergleicht die users-Liste mit dem letzten Snapshot und meldet
+    angelegte/gelöschte Konten sowie Rollenwechsel. Beim ersten Lauf (kein
+    Snapshot) wird nur der Ausgangszustand festgehalten, ohne zu posten."""
+    cur = {str(u.get("id")): {"username": u.get("username", "?"), "role": u.get("role", "?")}
+           for u in (current_users or []) if u.get("id") is not None}
+    if prev_snap is None:
+        return [], cur
+    lines = []
+    for uid, u in cur.items():
+        if uid not in prev_snap:
+            lines.append(format_user_line(f"Konto angelegt: {u['username']} ({_role_de(u['role'])})"))
+        elif prev_snap[uid].get("role") != u["role"]:
+            lines.append(format_user_line(
+                f"Rolle geändert: {u['username']}: {_role_de(prev_snap[uid].get('role'))} → {_role_de(u['role'])}"))
+    for uid, u in prev_snap.items():
+        if uid not in cur:
+            lines.append(format_user_line(f"Konto gelöscht: {u.get('username', '?')}"))
+    return lines, cur
 
 
 def make_backup_bytes(db_path):
@@ -339,17 +370,22 @@ class MatrixSync:
             self.log("db.json nicht lesbar (übersprungen):", e)
             return
         new_log, new_ledger, markers = select_new(db, self.state)
-        msg = build_message(new_log, new_ledger, self.cfg.max_lines)
+        user_lines, user_snap = diff_users(self.state.get("users_snap"), db.get("users", []))
+        lines = ([format_log_entry(e) for e in new_log]
+                 + [format_ledger_entry(e) for e in new_ledger]
+                 + user_lines)
+        msg = build_message(lines, self.cfg.max_lines)
         await self._refresh_keys()
         if msg:
             try:
                 await self.post_text(msg)
-                self.log(f"Protokolliert: {len(new_log)} Log + {len(new_ledger)} Kasse")
+                self.log(f"Protokolliert: {len(new_log)} Log + {len(new_ledger)} Kasse + {len(user_lines)} Konten")
             except Exception as e:
                 self.log("Senden fehlgeschlagen (erneuter Versuch später):", repr(e))
                 return  # Marker NICHT fortschreiben -> beim nächsten Mal erneut
         # Marker fortschreiben
         self.state.update(markers)
+        self.state["users_snap"] = user_snap
 
         now = time.time()
         due = force_backup or (now - self.last_backup >= self.cfg.backup_interval)
