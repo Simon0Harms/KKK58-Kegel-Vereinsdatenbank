@@ -470,3 +470,11 @@ Für den Ausgabebetrag gibt es eine einstellbare Vorgabe (Standard 35 €), die 
 Endpunkt: `POST /api/cash/expense { euro, date?, note, beneficiaries?[] }` (nur `canCash`). Bearbeiten: `POST /api/cash/expense/:id { euro, date?, note?, beneficiaries?[] }`.
 Ausgaben lassen sich im Kassenbuch einzeln stornieren. Im **GnuCash-Export** erscheinen sie als
 Buchung **Ausgaben (EXPENSE) gegen Kasse**; die Begünstigten stehen in der Buchungsbeschreibung.
+
+## Matrix-Protokoll & verschlüsseltes Backup (optionaler Sidecar)
+
+Im Ordner `matrix-backup/` liegt ein optionaler, **separater Python-Dienst**
+(`matrix-nio`), der jede Änderung in einen Matrix-Raum protokolliert und nach
+Änderungen ein **Ende-zu-Ende-verschlüsseltes Backup** von `db.json` hochlädt – nur
+für die Raummitglieder lesbar. Er liest `data/db.json` nur und lässt die
+abhängigkeitsfreie Node-App unverändert. Einrichtung siehe `matrix-backup/README.md`.

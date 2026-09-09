@@ -1,0 +1,23 @@
+[Unit]
+Description=KKk58 Matrix-Sidecar (Protokoll + verschlüsseltes Backup)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Eigener, unprivilegierter Benutzer empfohlen (muss db.json lesen dürfen):
+User=kkk58
+Group=kkk58
+# Das Skript lädt die Konfiguration selbst aus dieser Datei (kein EnvironmentFile
+# nötig – so werden auch Inline-Kommentare korrekt behandelt):
+Environment=KKK_ENV_FILE=/etc/kkk58-matrix.env
+ExecStart=/usr/bin/python3 /opt/kkk58/matrix-backup/kkk58_matrix_sync.py
+Restart=always
+RestartSec=15
+# Härtung
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
