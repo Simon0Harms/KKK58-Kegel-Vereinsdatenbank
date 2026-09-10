@@ -503,13 +503,19 @@ anmelden, den der KKk58-Bot in einen persönlichen Matrix-Chat schickt.
    einladen). Der Sidecar nimmt die Einladung automatisch an.
 2. In der App **oben auf den eigenen Namen** klicken → **Matrix-Login**.
 3. Die **Raum-ID** dieses Chats eintragen (beginnt mit `!`, ein Alias mit `#` geht
-   auch) und **„Bestätigungscode senden"** drücken.
+   auch) und **„Bestätigungscode senden"** drücken. Optional lässt sich dabei die
+   eigene **Matrix-ID** (`@name:server`) hinterlegen – nur als zusätzlicher
+   Nachschlage-Schlüssel für den Login (siehe unten). Sie kann später über
+   **„Matrix-ID speichern"** geändert oder entfernt werden.
 4. Der Bot schickt einen **6-stelligen Code** in den Chat; diesen in der App eingeben.
    Das beweist, dass der Raum wirklich dir gehört → Verknüpfung aktiv.
 
 **Anmelden:** Auf dem Login-Screen **„Kein Passwort? Login-Link per Matrix anfordern"**
-wählen, Benutzernamen eingeben. Der Bot schickt einen **5 Minuten gültigen, einmal
-verwendbaren** Login-Link in den verknüpften Chat.
+wählen und **Benutzername oder Matrix-ID** eingeben. Der Bot schickt einen **5 Minuten
+gültigen, einmal verwendbaren** Login-Link in den verknüpften Chat. Der Link geht immer
+nur in den **verifizierten Raum**, egal ob Benutzername oder MXID eingegeben wurde – die
+MXID ist daher nur ein bequemer Nachschlage-Schlüssel und muss serverseitig eindeutig
+sein.
 
 **Technik/Sicherheit:**
 
@@ -521,6 +527,7 @@ verwendbaren** Login-Link in den verknüpften Chat.
 - Die Login-Anforderung antwortet **immer generisch** – kein Rückschluss, ob ein Konto
   existiert oder verknüpft ist.
 - Für absolute Login-Links `KKK_PUBLIC_URL` setzen (siehe Abschnitt 2).
-- Datenmodell (Ergänzung in `data/db.json`): pro Konto `matrix` (`{ roomId, verified }`)
-  bzw. `matrixPending`; Liste `magic` für offene Login-Tokens. Alle drei werden aus dem
-  Matrix-Backup entfernt (`sanitize_db`).
+- Datenmodell (Ergänzung in `data/db.json`): pro Konto `matrix`
+  (`{ roomId, mxid?, verified }`) bzw. `matrixPending`; Liste `magic` für offene
+  Login-Tokens. `magic` und `matrixPending` werden aus dem Matrix-Backup entfernt
+  (`sanitize_db`).

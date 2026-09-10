@@ -118,6 +118,16 @@ function findInvite(token) { const t = String(token || ''); return db.invites.fi
 // ---------- Matrix-Login (Verknüpfung + Login-Link) ----------
 // Raum-ID (!id:server) oder Raum-Alias (#alias:server); Gesamtlänge begrenzt.
 function validRoom(s) { s = String(s || '').trim(); return s.length >= 3 && s.length <= 255 && /^[!#][^\s:]+:[^\s:]+$/.test(s) ? s : null; }
+// Matrix-Benutzer-ID (@name:server); optional, dient nur als Nachschlage-Schlüssel beim Login.
+function validMxid(s) { s = String(s || '').trim(); return s.length >= 3 && s.length <= 255 && /^@[^\s:]+:[^\s:]+$/.test(s) ? s : null; }
+// Konto anhand der Eingabe finden: MXID (@name:server) -> über verknüpfte, verifizierte MXID; sonst Benutzername.
+function findUserByLogin(login) {
+  const s = String(login || '').trim(); if (!s) return null;
+  if (s[0] === '@') { const l = s.toLowerCase(); return db.users.find(u => u.matrix && u.matrix.verified && u.matrix.mxid && u.matrix.mxid.toLowerCase() === l) || null; }
+  return db.users.find(u => u.username.toLowerCase() === s.toLowerCase()) || null;
+}
+// Prüft, ob eine MXID bereits einem anderen Konto zugeordnet ist.
+function mxidTakenBy(mxid, exceptUserId) { const l = String(mxid).toLowerCase(); return db.users.find(u => u.id !== exceptUserId && u.matrix && u.matrix.mxid && u.matrix.mxid.toLowerCase() === l) || null; }
 function hmacHex(v) { return crypto.createHmac('sha256', SECRET).update(String(v)).digest('hex'); }
 function eqHex(a, b) { const x = Buffer.from(String(a), 'hex'), y = Buffer.from(String(b), 'hex'); return x.length === y.length && x.length > 0 && crypto.timingSafeEqual(x, y); }
 function newMatrixCode() { return String(crypto.randomInt(0, 1000000)).padStart(6, '0'); }
@@ -134,8 +144,8 @@ function enqueueMatrix(roomId, body) {
 }
 function matrixInfo(user) {
   if (!user) return null;
-  if (user.matrix && user.matrix.verified) return { roomId: user.matrix.roomId, verified: true };
-  if (user.matrixPending && user.matrixPending.expires > Date.now()) return { roomId: user.matrixPending.roomId, verified: false, pending: true, expires: user.matrixPending.expires };
+  if (user.matrix && user.matrix.verified) return { roomId: user.matrix.roomId, mxid: user.matrix.mxid || null, verified: true };
+  if (user.matrixPending && user.matrixPending.expires > Date.now()) return { roomId: user.matrixPending.roomId, mxid: user.matrixPending.mxid || null, verified: false, pending: true, expires: user.matrixPending.expires };
   return null;
 }
 function createMagic(userId) {
@@ -627,10 +637,11 @@ function handle(req, res) {
     const ip = clientIp(req);
     if (throttled(ip)) return send(res, 429, { error: 'zu viele Versuche, bitte später erneut' });
     return readJson(req, body => {
-      const uname = String((body && body.username) || '').trim();
+      // "login" akzeptiert Benutzername ODER Matrix-ID (@name:server); "username" bleibt kompatibel
+      const login = String((body && (body.login != null ? body.login : body.username)) || '').trim();
       const generic = { ok: true, sent: true };
-      if (!uname) return send(res, 400, { error: 'bad request' });
-      const user = db.users.find(x => x.username.toLowerCase() === uname.toLowerCase());
+      if (!login) return send(res, 400, { error: 'bad request' });
+      const user = findUserByLogin(login);
       if (user && user.matrix && user.matrix.verified && user.matrix.roomId) {
         // je Nutzer höchstens alle 30 s einen Login-Link erzeugen
         if (!mRateHit('mlogin:' + user.id, 30000)) {
@@ -694,9 +705,17 @@ function handle(req, res) {
     return readJson(req, body => {
       const room = validRoom(body && body.roomId);
       if (!room) return send(res, 422, { error: 'Raum-ID ungültig (z. B. !abc:server oder #alias:server)' });
+      // Optionale MXID (nur Nachschlage-Schlüssel für den Login). Leerer Wert = keine.
+      let mxid = null;
+      if (body && body.mxid != null && String(body.mxid).trim() !== '') {
+        mxid = validMxid(body.mxid);
+        if (!mxid) return send(res, 422, { error: 'Matrix-ID ungültig (z. B. @name:server)' });
+        const taken = mxidTakenBy(mxid, me.id);
+        if (taken) return send(res, 409, { error: 'Diese Matrix-ID ist bereits einem anderen Konto zugeordnet.' });
+      }
       if (mRateHit('mlink:' + me.id, 30000)) return send(res, 429, { error: 'Bitte kurz warten, bevor du einen neuen Code anforderst.' });
       const code = newMatrixCode();
-      me.matrixPending = { roomId: room, codeHash: hmacHex(code), expires: Date.now() + MATRIX_CODE_TTL, tries: 0 };
+      me.matrixPending = { roomId: room, mxid, codeHash: hmacHex(code), expires: Date.now() + MATRIX_CODE_TTL, tries: 0 };
       flushDb();
       const ok = enqueueMatrix(room,
         '🎳 KKk58 – Verknüpfung\nDein Bestätigungscode: ' + code +
@@ -714,8 +733,24 @@ function handle(req, res) {
       if (p.tries > 5) { delete me.matrixPending; flushDb(); return send(res, 429, { error: 'Zu viele Fehlversuche – bitte neu anfordern.' }); }
       const code = String((body && body.code) || '').trim();
       if (!/^\d{6}$/.test(code) || !eqHex(hmacHex(code), p.codeHash)) { flushDb(); return send(res, 401, { error: 'Code falsch', triesLeft: Math.max(0, 5 - p.tries) }); }
-      me.matrix = { roomId: p.roomId, verified: true, linkedAt: Date.now() };
+      // MXID nur übernehmen, wenn sie inzwischen nicht anderweitig vergeben wurde
+      const mxid = (p.mxid && !mxidTakenBy(p.mxid, me.id)) ? p.mxid : null;
+      me.matrix = { roomId: p.roomId, mxid, verified: true, linkedAt: Date.now() };
       delete me.matrixPending; flushDb();
+      send(res, 200, { ok: true, matrix: matrixInfo(me) });
+    });
+  }
+  // Matrix-ID des verknüpften Kontos setzen/ändern/entfernen (ohne erneute Raum-Verifikation)
+  if (api === '/me/matrix/mxid' && req.method === 'POST') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
+    return readJson(req, body => {
+      if (!(me.matrix && me.matrix.verified)) return send(res, 409, { error: 'Erst einen Raum verknüpfen.' });
+      const raw = body && body.mxid != null ? String(body.mxid).trim() : '';
+      if (raw === '') { delete me.matrix.mxid; flushDb(); return send(res, 200, { ok: true, matrix: matrixInfo(me) }); }
+      const mxid = validMxid(raw);
+      if (!mxid) return send(res, 422, { error: 'Matrix-ID ungültig (z. B. @name:server)' });
+      if (mxidTakenBy(mxid, me.id)) return send(res, 409, { error: 'Diese Matrix-ID ist bereits einem anderen Konto zugeordnet.' });
+      me.matrix.mxid = mxid; flushDb();
       send(res, 200, { ok: true, matrix: matrixInfo(me) });
     });
   }

@@ -246,8 +246,8 @@
     <div class="mxlogin">
       <a href="#" id="l_matrix_toggle">Kein Passwort? Login-Link per Matrix anfordern</a>
       <div id="l_matrix_box" class="hidden">
-        <label for="l_mx_user">Benutzername</label>
-        <input id="l_mx_user" type="text" autocomplete="username" autocapitalize="off">
+        <label for="l_mx_user">Benutzername oder Matrix-ID</label>
+        <input id="l_mx_user" type="text" autocomplete="username" autocapitalize="off" placeholder="max  oder  @max:matrix.example.org">
         <button id="l_mx_send" type="button">Login-Link senden</button>
         <div id="l_mx_msg" class="mxmsg"></div>
       </div>
@@ -294,6 +294,11 @@
       <label for="mx_room">Raum-ID deines Bot-Chats</label>
       <input id="mx_room" type="text" autocapitalize="off" autocomplete="off" placeholder="!abc123:matrix.example.org">
       <p class="mxhint">Die Raum-ID findest du in deinem Matrix-Client in den Raum-Einstellungen (beginnt mit ! oder als Alias mit #). Der KKk58-Bot muss Mitglied des Raums sein.</p>
+
+      <label for="mx_mxid">Deine Matrix-ID <span class="muted2">(optional)</span></label>
+      <input id="mx_mxid" type="text" autocapitalize="off" autocomplete="off" placeholder="@name:matrix.example.org">
+      <p class="mxhint">Optional: Damit kannst du dir den Login-Link später auch über deine Matrix-ID statt deines Benutzernamens schicken lassen.</p>
+
       <button id="mx_reqcode" type="button">Bestätigungscode senden</button>
 
       <div id="mx_verifybox" class="hidden">
@@ -301,6 +306,8 @@
         <input id="mx_code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-stelliger Code">
         <button id="mx_verify" type="button">Code bestätigen</button>
       </div>
+
+      <button id="mx_savemxid" type="button" class="btn ghost hidden" style="width:100%;margin-top:8px">Matrix-ID speichern</button>
     </div>
 
     <button id="mx_unlink" type="button" class="btn warn hidden" style="width:100%;margin-top:10px">Verknüpfung entfernen</button>
@@ -574,9 +581,9 @@
     if(!box.classList.contains("hidden")){ if(!$("l_mx_user").value) $("l_mx_user").value=$("l_user").value.trim(); $("l_mx_user").focus(); }
   });
   async function requestMatrixLogin(){
-    const u=$("l_mx_user").value.trim(); if(!u){ $("l_mx_msg").textContent="Bitte Benutzername eingeben."; return; }
+    const u=$("l_mx_user").value.trim(); if(!u){ $("l_mx_msg").textContent="Bitte Benutzername oder Matrix-ID eingeben."; return; }
     $("l_mx_send").disabled=true;
-    await api('/login/matrix/request',{method:'POST',body:{username:u}});
+    await api('/login/matrix/request',{method:'POST',body:{login:u}});
     $("l_mx_send").disabled=false;
     // bewusst generische Rückmeldung (kein Rückschluss, ob das Konto existiert/verknüpft ist)
     $("l_mx_msg").textContent="Falls ein verknüpftes Matrix-Konto existiert, wurde ein Login-Link in deinen Bot-Chat gesendet. Er ist 5 Minuten gültig.";
@@ -591,15 +598,18 @@
     $("mx_err").textContent="";
     if(verified){
       stEl.className="mxstatus ok";
-      stEl.innerHTML='✓ Verknüpft mit Raum <span class="mxroom">'+esc(st.roomId)+'</span>';
+      stEl.innerHTML='✓ Verknüpft mit Raum <span class="mxroom">'+esc(st.roomId)+'</span>'+(st.mxid?('<br>Matrix-ID: <span class="mxroom">'+esc(st.mxid)+'</span>'):'');
       $("mx_unlink").classList.remove("hidden");
+      $("mx_savemxid").classList.remove("hidden");
       if(!$("mx_room").value) $("mx_room").value=st.roomId;
     } else {
       stEl.className="mxstatus no";
       stEl.textContent = (st&&st.pending) ? "Verknüpfung läuft – Code aus dem Chat eingeben." : "Noch nicht verknüpft.";
       $("mx_unlink").classList.add("hidden");
+      $("mx_savemxid").classList.add("hidden");
       if(st&&st.roomId&&!$("mx_room").value) $("mx_room").value=st.roomId;
     }
+    if(st&&st.mxid&&!$("mx_mxid").value) $("mx_mxid").value=st.mxid;
     $("mx_verifybox").classList.toggle("hidden", !(st&&st.pending));
   }
   function openMatrixDialog(){ if(!me) return; $("mxdlg").classList.remove("hidden"); $("mx_code").value=""; renderMatrixDialog(); }
@@ -609,11 +619,12 @@
   $("mx_reqcode").addEventListener("click",async()=>{
     $("mx_err").textContent=""; const room=$("mx_room").value.trim();
     if(!room){ $("mx_err").textContent="Bitte Raum-ID eingeben."; return; }
+    const mxid=$("mx_mxid").value.trim();
     $("mx_reqcode").disabled=true;
-    const r=await api('/me/matrix/link',{method:'POST',body:{roomId:room}});
+    const r=await api('/me/matrix/link',{method:'POST',body:{roomId:room,mxid}});
     $("mx_reqcode").disabled=false;
     if(r.ok){
-      me.matrix={roomId:r.data.roomId,pending:true,verified:false,expires:r.data.expires};
+      me.matrix={roomId:r.data.roomId,mxid:mxid||null,pending:true,verified:false,expires:r.data.expires};
       renderMatrixDialog(); $("mx_verifybox").classList.remove("hidden"); $("mx_code").focus();
       toast(r.data.queued?"Code gesendet – schau in deinen Bot-Chat":"Code erzeugt (Sidecar prüfen)");
     } else $("mx_err").textContent=(r.data&&r.data.error)||"Konnte Code nicht senden";
@@ -627,10 +638,16 @@
   }
   $("mx_verify").addEventListener("click",verifyMatrixCode);
   $("mx_code").addEventListener("keydown",e=>{if(e.key==='Enter')verifyMatrixCode();});
+  $("mx_savemxid").addEventListener("click",async()=>{
+    $("mx_err").textContent="";
+    const r=await api('/me/matrix/mxid',{method:'POST',body:{mxid:$("mx_mxid").value.trim()}});
+    if(r.ok){ me.matrix=r.data.matrix; renderMatrixDialog(); toast($("mx_mxid").value.trim()?"Matrix-ID gespeichert":"Matrix-ID entfernt"); }
+    else $("mx_err").textContent=(r.data&&r.data.error)||"Fehler";
+  });
   $("mx_unlink").addEventListener("click",async()=>{
     if(!confirm("Matrix-Verknüpfung wirklich entfernen?"))return;
     const r=await api('/me/matrix/unlink',{method:'POST'});
-    if(r.ok){ me.matrix=null; $("mx_room").value=""; $("mx_code").value=""; renderMatrixDialog(); toast("Verknüpfung entfernt"); }
+    if(r.ok){ me.matrix=null; $("mx_room").value=""; $("mx_code").value=""; $("mx_mxid").value=""; renderMatrixDialog(); toast("Verknüpfung entfernt"); }
     else $("mx_err").textContent=(r.data&&r.data.error)||"Fehler";
   });
 
