@@ -72,9 +72,16 @@ sudo systemctl start kkk58
 
 - **Der Raum MUSS verschlüsselt sein.** Bei `KKK_REQUIRE_ENCRYPTION=1` (Standard)
   sendet der Dienst gar nichts, falls der Raum unverschlüsselt ist.
-- Das Backup enthält u. a. die Login-Konten mit **Passwort-Hashes** (scrypt) sowie
-  Namen und Kassendaten. Beschränke die Raummitgliedschaft streng und teile die
+- Das hochgeladene Backup ist **bereinigt**: Passwort-Hashes/Salts der Konten
+  (`hash`/`salt`) und die Einladungs-/Einmal-Login-Tokens (`invites`) werden vor dem
+  Upload entfernt (siehe `sanitize_db`); lässt sich die `db.json` ausnahmsweise nicht
+  parsen, wird der Upload dieses Durchlaufs **übersprungen** statt Rohdaten hochzuladen.
+  Das Backup enthält weiterhin Konten-Metadaten (Benutzername, Rolle), Namen und
+  Kassendaten – beschränke die Raummitgliedschaft dennoch streng und teile die
   Verschlüsselung nur mit vertrauenswürdigen Geräten.
+  Hinweis: Ohne Hashes ist das Backup **nicht ohne Weiteres für ein 1:1-Restore der
+  Logins** geeignet – für eine vollständige Sicherung die Admin-Voll-Sicherung
+  (`GET /api/db?full=1`) nutzen und getrennt sicher aufbewahren.
 - Sichere den Ordner `KKK_MATRIX_STORE` (enthält die E2EE-Schlüssel und das Token) –
   ohne ihn kann der Bot verschlüsselte Verläufe nicht mehr lesen und muss neu
   verifiziert werden.

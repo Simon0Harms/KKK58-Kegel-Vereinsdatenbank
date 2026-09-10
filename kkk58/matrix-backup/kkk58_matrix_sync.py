@@ -229,10 +229,38 @@ def diff_users(prev_snap, current_users):
     return lines, cur
 
 
+def sanitize_db(db):
+    """Zugangsdaten aus dem DB-Abbild entfernen, bevor es hochgeladen wird:
+    Passwort-Hashes/Salts je Konto sowie die Einladungs-/Einmal-Login-Tokens.
+    Arbeitet auf einer Kopie; die Original-db.json bleibt unverändert."""
+    if not isinstance(db, dict):
+        return db
+    clean = dict(db)
+    users = clean.get("users")
+    if isinstance(users, list):
+        sanitized = []
+        for u in users:
+            if isinstance(u, dict):
+                u = {k: v for k, v in u.items() if k not in ("hash", "salt")}
+            sanitized.append(u)
+        clean["users"] = sanitized
+    # Einladungen enthalten Einmal-Login-Tokens -> komplett weglassen
+    clean.pop("invites", None)
+    return clean
+
+
 def make_backup_bytes(db_path):
-    """db.json einlesen und gzip-komprimieren -> (dateiname, bytes, mimetype)."""
+    """db.json einlesen, Zugangsdaten entfernen und gzip-komprimieren -> (dateiname, bytes, mimetype)."""
     with open(db_path, "rb") as f:
         raw = f.read()
+    try:
+        db = json.loads(raw)
+        clean = sanitize_db(db)
+        raw = json.dumps(clean, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    except (ValueError, TypeError):
+        # Falls die Datei ausnahmsweise nicht parsebar ist, lieber NICHT die Rohdaten
+        # (mit Hashes) hochladen -> Backup dieses Durchlaufs überspringen.
+        raise
     packed = gzip.compress(raw)
     fname = "kkk58-db-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".json.gz"
     return fname, packed, "application/gzip"
