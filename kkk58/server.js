@@ -45,7 +45,7 @@ function emptySheet() {
   return { event: '', date: '', lanes: { bohle: true, schere: false }, priceNK: 1, pricePump: 0.1,
     pumpen: '', note: '', seq: 0, players: [], updatedBy: '', updatedAt: 0 };
 }
-let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
+let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, develop: [], seqDevelop: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
 const LOG_MAX = 400;
 
 function cint(v, mn, mx, fb) { let n = Math.round(Number(v)); if (!isFinite(n)) return fb; return Math.min(mx, Math.max(mn, n)); }
@@ -171,6 +171,32 @@ function seedTrips() {
   ];
   db.trips = data.map(([year, place, description, period]) => normTrip({ id: ++db.seqTrips, year, place, description, period }));
 }
+// ---------- Mitgliederentwicklung / Chronik ----------
+// Ein Eintrag je Ereignis: Datum (Freitext, weil die Vorlage gemischte Formate nutzt –
+// "1958", "01.01.1960", "Sept 1994"), Beschreibung (mehrzeilig) und optional die
+// aktuelle Mitgliederzahl zum Zeitpunkt (wie in der Vorlage sporadisch geführt).
+// Sortiert wird chronologisch über den aus dem Datumstext abgeleiteten Schlüssel (siehe developSortKey).
+const DEVELOP_DESC_MAX = 3000;
+function normDevelopCount(v) { if (v == null || v === '') return null; const n = Math.round(Number(v)); return isFinite(n) && n >= 0 && n <= 9999 ? n : null; }
+function normDevelop(src) {
+  return {
+    id: (src && src.id != null) ? Number(src.id) : null,
+    date: String((src && src.date) || '').trim().slice(0, 60),
+    description: String(src && src.description == null ? '' : src.description).replace(/\r\n/g, '\n').replace(/\r/g, '\n').slice(0, DEVELOP_DESC_MAX),
+    count: normDevelopCount(src && src.count)
+  };
+}
+// Startdatensatz für frische bzw. auf die Chronik migrierte Datenbanken.
+// Öffentliche Version ohne reale Vereinsdaten: die Chronik startet leer und wird
+// über die Oberfläche gepflegt. Zwei neutrale Beispielzeilen zeigen Datumsformat und
+// Sortierung; wer ohne Beispiel starten will, setzt das Array einfach auf [].
+function seedDevelop() {
+  const data = [
+    ['1958', 'Kegelklub gegründet (Beispieleintrag – zum Bearbeiten oder Löschen).', 7],
+    ['01.01.2020', 'Beispieleintrag: Eingetreten: Max Mustermann', 8]
+  ];
+  db.develop = data.map(([date, description, count]) => normDevelop({ id: ++db.seqDevelop, date, description, count }));
+}
 function loadDb() {
   try {
     const j = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
@@ -197,6 +223,10 @@ function loadDb() {
     db.seqTrips = j.seqTrips || db.trips.reduce((m, t) => Math.max(m, t.id), 0);
     // Migration älterer Datenbanken ohne Ausflüge: historische Liste als Startdatensatz anlegen
     if (!Object.prototype.hasOwnProperty.call(j, 'trips')) seedTrips();
+    db.develop = Array.isArray(j.develop) ? j.develop.map(normDevelop).filter(d => d.id != null && (d.description || d.date)) : [];
+    db.seqDevelop = j.seqDevelop || db.develop.reduce((m, d) => Math.max(m, d.id), 0);
+    // Migration älterer Datenbanken ohne Chronik: Mitgliederentwicklung als Startdatensatz anlegen
+    if (!Object.prototype.hasOwnProperty.call(j, 'develop')) seedDevelop();
     db.log = Array.isArray(j.log) ? j.log.slice(-LOG_MAX) : [];
     const nowL = Date.now();
     db.invites = Array.isArray(j.invites) ? j.invites.filter(x => x && !x.used && x.expires > nowL) : [];
@@ -206,7 +236,7 @@ function loadDb() {
     const cs = j.cashSettings || {};
     db.cashSettings = { duesCent: Number.isFinite(cs.duesCent) ? cs.duesCent : 2000, absenceCent: Number.isFinite(cs.absenceCent) ? cs.absenceCent : 100, expenseCent: Number.isFinite(cs.expenseCent) ? cs.expenseCent : 3500, duesStartMonth: /^\d{4}-\d{2}$/.test(cs.duesStartMonth) ? cs.duesStartMonth : null };
     db.version = j.version || 0;
-  } catch (_) { /* Erststart */ seedPrizes(); seedTrips(); }
+  } catch (_) { /* Erststart */ seedPrizes(); seedTrips(); seedDevelop(); }
 }
 let saveTimer = null;
 function saveDb() { clearTimeout(saveTimer); saveTimer = setTimeout(flushDb, 250); }
@@ -357,6 +387,9 @@ function describeOp(op, ctx) {
     case 'addTrip': return 'Ausflug angelegt: ' + (op.trip ? (op.trip.year + ' ' + (op.trip.place || '')).trim() : '');
     case 'updateTrip': return 'Ausflug bearbeitet: ' + (op.trip ? (op.trip.year + ' ' + (op.trip.place || '')).trim() : '');
     case 'removeTrip': return 'Ausflug gelöscht';
+    case 'addDevelop': return 'Chronik: Eintrag angelegt (' + (op.entry && op.entry.date ? op.entry.date : 'ohne Datum') + ')';
+    case 'updateDevelop': return 'Chronik: Eintrag bearbeitet (' + (op.entry && op.entry.date ? op.entry.date : 'ohne Datum') + ')';
+    case 'removeDevelop': return 'Chronik: Eintrag gelöscht';
     default: return op.type;
   }
 }
@@ -805,6 +838,26 @@ function applyOp(op, user) {
       if (db.trips.length === b) return null;
       return { type: 'removeTrip', id: Number(op.id) };
     }
+    // ----- Mitgliederentwicklung / Chronik (Anlegen/Bearbeiten/Löschen nur mit Verwaltungsrecht) -----
+    case 'addDevelop': {
+      if (!canManage(user.role)) return null;
+      const e = normDevelop(op.entry || {}); if (!e.description && !e.date) return null;
+      e.id = ++db.seqDevelop; db.develop.push(e);
+      return { type: 'addDevelop', entry: e };
+    }
+    case 'updateDevelop': {
+      if (!canManage(user.role)) return null;
+      const cur = db.develop.find(x => x.id === Number(op.id)); if (!cur) return null;
+      const e = normDevelop(Object.assign({}, op.entry, { id: cur.id })); if (!e.description && !e.date) return null;
+      cur.date = e.date; cur.description = e.description; cur.count = e.count;
+      return { type: 'updateDevelop', id: cur.id, entry: cur };
+    }
+    case 'removeDevelop': {
+      if (!canManage(user.role)) return null;
+      const b = db.develop.length; db.develop = db.develop.filter(x => x.id !== Number(op.id));
+      if (db.develop.length === b) return null;
+      return { type: 'removeDevelop', id: Number(op.id) };
+    }
     default: return null;
   }
 }
@@ -990,7 +1043,7 @@ function handle(req, res) {
     catch (e) { return send(res, 400, { error: 'Daten zu lang für QR' }); }
   }
   if (api === '/logout' && req.method === 'POST') { clearSessionCookie(res); return send(res, 200, { ok: true }); }
-  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
+  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, develop: db.develop, me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
   if (api === '/roster' && req.method === 'GET') return send(res, 200, { roster: db.roster });
   if (api === '/archive' && req.method === 'GET') return send(res, 200, { archive: db.archive.map(archiveMeta).sort((a, b) => b.savedAt - a.savedAt) });
   if (api === '/export' && req.method === 'GET') {
@@ -1016,7 +1069,7 @@ function handle(req, res) {
   if (api === '/events' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.write('retry: 3000\n\n');
-    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, develop: db.develop }) + '\n\n');
     const c = { res, uid: me.id }; clients.add(c); req.on('close', () => clients.delete(c)); return;
   }
 

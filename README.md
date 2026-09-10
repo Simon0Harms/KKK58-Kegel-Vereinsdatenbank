@@ -442,6 +442,27 @@ Oben erscheint eine schmale, mitscrollende Leiste mit Anlass/Datum sowie den But
 gemerkt (`localStorage`), sodass ein Tablet nach dem Neuladen direkt wieder im Eintrag-Modus
 startet. Ein Wechsel in einen anderen Reiter beendet den Fokus-Modus automatisch.
 
+## Chronik / Mitgliederentwicklung
+
+Der Reiter **„Chronik"** führt die **Mitgliederentwicklung des Kegelklubs „Konus 58"** als
+chronologische Ereignisliste mit den Spalten **Datum · Beschreibung · akt. Mitgl.** Die Liste
+ist für **alle angemeldeten Konten sichtbar**; **Anlegen, Bearbeiten und Löschen** nur mit
+**Verwaltungsrecht** (Admin, Kassenwart, Mitglied) – wie bei Preisen und Ausflügen.
+
+- **Datum** ist ein Freitextfeld, damit gemischte Angaben aus der Vorlage möglich bleiben
+  (`01.01.1960`, `Sept 1994`, `2017`, oder auch leer). Sortiert wird trotzdem **chronologisch**:
+  aus dem Text werden Jahr, Monat und Tag abgeleitet (Einträge ohne erkennbares Jahr wandern ans
+  Ende). Mit der Umschaltung **„Neueste zuerst"** lässt sich die Richtung drehen.
+- **akt. Mitgl.** ist optional (0–9999) und wird – wie in der Papiervorlage – **manuell** je
+  Eintrag gepflegt; leere Felder bleiben leer (keine automatische Berechnung).
+- **CSV-Export** (`⬇ CSV`) liefert die aktuell sortierte Liste mit UTF-8-BOM für Excel.
+
+Beim ersten Start bzw. bei der Migration einer bestehenden Datenbank ohne Chronik wird die Liste
+**automatisch** mit der überlieferten Mitgliederentwicklung (Stand 01.01.2019) vorbefüllt und ist
+danach frei editierbar. Speicherung als `develop`/`seqDevelop` in `data/db.json`; Änderungen
+laufen über die Live-Sync-Operationen `addDevelop` / `updateDevelop` / `removeDevelop` und
+erscheinen sofort bei allen angemeldeten Mitgliedern.
+
 ## GnuCash-Export
 
 In der Kasse gibt es den Button **„⬇ GnuCash-Export (.gnucash)"**. Er ist für **alle

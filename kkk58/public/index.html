@@ -263,6 +263,10 @@
   .triptable td.tperiod{white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}
   .triptable td.tactions{white-space:nowrap;text-align:right}
   .triptable tbody tr:hover{background:var(--card)}
+  .triptable td.ddate{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .triptable td.dtext{white-space:pre-wrap;min-width:200px}
+  .triptable td.dcount{text-align:center;font-variant-numeric:tabular-nums;font-weight:700}
+  .triptable td.dcount .muted2{font-weight:400}
   .dirgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:6px}
   .dirgrid .dirfull{grid-column:1 / -1}
   .dirgrid .fld label{display:block;font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 4px}
@@ -388,6 +392,7 @@
       <button id="nav_dir" type="button">Verzeichnis</button>
       <button id="nav_prizes" type="button">Preise</button>
       <button id="nav_trips" type="button">Ausflüge</button>
+      <button id="nav_develop" type="button">Chronik</button>
       <button id="nav_cash" type="button" class="hidden">Kasse</button>
       <div class="btnrow" id="sheetBtns">
         <button id="btn_focus" type="button" title="Nur die Liste anzeigen (Menü ausblenden)">⛶ Nur Liste</button>
@@ -534,6 +539,19 @@
     <div id="tripList"></div>
     <p class="foot" id="tripFoot" style="text-align:left">Die Ausflugsliste ist für alle angemeldeten Mitglieder sichtbar. Anlegen, Bearbeiten und Löschen nur mit Verwaltungsrecht (Admin, Kassenwart, Mitglied).</p>
   </section>
+
+  <!-- ===== CHRONIK / MITGLIEDERENTWICKLUNG ===== -->
+  <section id="view_develop" class="hidden">
+    <div class="dirbar">
+      <span class="prizeintro">Mitgliederentwicklung des Kegelklubs „Konus 58", chronologisch sortiert.</span>
+      <span style="flex:1"></span>
+      <label class="chip" id="dev_sort_lbl" title="Sortierrichtung nach Datum umschalten"><input type="checkbox" id="dev_desc">Neueste zuerst</label>
+      <button class="btn ghost sm" id="dev_export" type="button" title="Chronik als CSV herunterladen">⬇ CSV</button>
+      <button class="btn prim sm hidden" id="dev_add" type="button">＋ Eintrag</button>
+    </div>
+    <div id="developList"></div>
+    <p class="foot" id="developFoot" style="text-align:left">Die Chronik ist für alle angemeldeten Mitglieder sichtbar. Anlegen, Bearbeiten und Löschen nur mit Verwaltungsrecht (Admin, Kassenwart, Mitglied).</p>
+  </section>
 </div>
 
 <!-- VERZEICHNIS: Bearbeiten-Dialog -->
@@ -596,6 +614,24 @@
   </div>
 </div>
 
+<!-- CHRONIK: Bearbeiten-Dialog -->
+<div id="devdlg" class="ovl hidden">
+  <div class="login dirdlg">
+    <div class="eyebrow">Mitgliederentwicklung</div>
+    <h1 id="dv_title">Eintrag bearbeiten</h1>
+    <div class="dirgrid">
+      <div class="fld"><label>Datum</label><input id="dv_date" type="text" placeholder="z. B. 02.04.2019, Sept 1994 oder 2017" autocapitalize="none"></div>
+      <div class="fld"><label>Aktuelle Mitglieder (optional)</label><input id="dv_count" type="number" min="0" max="9999" step="1" inputmode="numeric" placeholder="z. B. 11"></div>
+      <div class="fld dirfull"><label>Beschreibung</label><textarea id="dv_desc" rows="4" placeholder="z. B. Eingetreten: H. Harcken"></textarea></div>
+    </div>
+    <div class="dderr err" id="dv_err"></div>
+    <div class="ddrow">
+      <button class="btn prim" id="dv_save" type="button">Speichern</button>
+      <button class="btn" id="dv_cancel" type="button">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
 <!-- KASSE: Buchungs-Dialog -->
 <div id="cashdlg" class="ovl hidden">
   <div class="login">
@@ -641,7 +677,7 @@
   const canManage=r=>r==="admin"||r==="kassenwart"||r==="mitglied";
   const canCash=r=>r==="admin"||r==="kassenwart";
   const roleLabel=r=>ROLE_LABEL[r]||r;
-  let me=null, state=null, roster=[], prizes=[], trips=[], version=0, es=null, currentView="sheet", sortMode="arrival";
+  let me=null, state=null, roster=[], prizes=[], trips=[], develop=[], version=0, es=null, currentView="sheet", sortMode="arrival";
   const pending=new Set();
   const rid=()=> (crypto.randomUUID? crypto.randomUUID() : String(Date.now())+Math.random());
   const $=id=>document.getElementById(id);
@@ -685,7 +721,7 @@
     $("adminPanel").hidden=!manage; $("nav_cash").classList.remove("hidden");
     const seg=$("rvSeg"); if(seg) seg.querySelectorAll("button").forEach(b=>b.classList.toggle("active", b.dataset.vr===eff));
     $("rvNote").textContent = viewRole ? "Nur Vorschau – deine echten Rechte bleiben Admin." : "";
-    renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); if(currentView==="archive") loadArchive(); if(currentView==="cash"&&cashData) renderCash(); }
+    renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); if(currentView==="archive") loadArchive(); if(currentView==="cash"&&cashData) renderCash(); }
   function setViewRole(r){ if(!(me&&me.role==='admin'))return; viewRole = (r==='admin'||r===me.role) ? null : r; applyRoleUI(); }
   function showApp(){ $("view_invite").classList.add("hidden"); $("view_login").classList.add("hidden"); $("view_app").classList.remove("hidden");
     if(!(me&&me.role==='admin')) viewRole=null;
@@ -819,7 +855,7 @@
   $("pw_new2").addEventListener("keydown",e=>{if(e.key==='Enter')submitPw();});
 
   async function loadState(){ const r=await api('/state');
-    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; prizes=r.data.prizes||[]; trips=r.data.trips||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); loadLog();
+    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); loadLog();
       if(me&&me.mustChangePassword&&$("pwdlg").classList.contains("hidden")) openPwDialog(); }
     else if(r.status===401) showLogin(); }
   function resync(){ loadState(); }
@@ -834,6 +870,7 @@
     $("view_directory").classList.toggle("hidden",v!=="dir");
     $("view_prizes").classList.toggle("hidden",v!=="prizes");
     $("view_trips").classList.toggle("hidden",v!=="trips");
+    $("view_develop").classList.toggle("hidden",v!=="develop");
     $("sheetBtns").style.display = v==="sheet" ? "" : "none";
     $("nav_sheet").classList.toggle("active",v==="sheet");
     $("nav_archive").classList.toggle("active",v==="archive");
@@ -842,12 +879,14 @@
     $("nav_dir").classList.toggle("active",v==="dir");
     $("nav_prizes").classList.toggle("active",v==="prizes");
     $("nav_trips").classList.toggle("active",v==="trips");
+    $("nav_develop").classList.toggle("active",v==="develop");
     if(v==="archive") loadArchive();
     if(v==="stats") loadStats();
     if(v==="cash") loadCash();
     if(v==="dir") renderDirectory();
     if(v==="prizes") renderPrizes();
     if(v==="trips") renderTrips();
+    if(v==="develop") renderDevelop();
   }
   // Fokus-Modus: nur die Liste zum Eintragen (Menü/Kopf ausgeblendet)
   function updateFocusMeta(){ const ev=($("f_event").value||"").trim(), dt=$("f_date").value||""; $("fbMeta").textContent=[ev,dt].filter(Boolean).join(" · "); }
@@ -859,6 +898,7 @@
   $("nav_dir").addEventListener("click",()=>setView("dir"));
   $("nav_prizes").addEventListener("click",()=>setView("prizes"));
   $("nav_trips").addEventListener("click",()=>setView("trips"));
+  $("nav_develop").addEventListener("click",()=>setView("develop"));
   $("rvSeg").addEventListener("click",e=>{ const b=e.target.closest("button[data-vr]"); if(b)setViewRole(b.dataset.vr); });
   $("btn_focus").addEventListener("click",()=>setFocus(true));
   $("fb_exit").addEventListener("click",()=>setFocus(false));
@@ -869,7 +909,7 @@
     es.onopen=()=>$("conn").classList.remove("off");
     es.onerror=()=>$("conn").classList.add("off");
     es.onmessage=ev=>{ let m; try{m=JSON.parse(ev.data);}catch(_){return;}
-      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; prizes=m.prizes||prizes; trips=m.trips||trips; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); loadLog(); return; }
+      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; prizes=m.prizes||prizes; trips=m.trips||trips; develop=m.develop||develop; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); loadLog(); return; }
       applyRemote(m); }; }
   function applyRemote(m){
     if(typeof m.v!=='number')return;
@@ -910,6 +950,9 @@
       case 'addTrip': if(op.trip && !trips.some(t=>t.id===op.trip.id)) trips.push(op.trip); renderTrips(); return;
       case 'updateTrip': { const i=trips.findIndex(t=>t.id===op.id); if(i>=0 && op.trip) trips[i]=op.trip; renderTrips(); return; }
       case 'removeTrip': trips=trips.filter(t=>t.id!==op.id); renderTrips(); return;
+      case 'addDevelop': if(op.entry && !develop.some(d=>d.id===op.entry.id)) develop.push(op.entry); renderDevelop(); return;
+      case 'updateDevelop': { const i=develop.findIndex(d=>d.id===op.id); if(i>=0 && op.entry) develop[i]=op.entry; renderDevelop(); return; }
+      case 'removeDevelop': develop=develop.filter(d=>d.id!==op.id); renderDevelop(); return;
     }
     updateDerived();
   }
@@ -1287,6 +1330,60 @@
     const rows=tripsSorted().map(t=>[t.year,t.place,t.description,t.period].map(csvCell).join(';'));
     const csv='﻿'+[head.map(csvCell).join(';')].concat(rows).join('\r\n');
     dlBlob(csv,'text/csv;charset=utf-8','KKk58-Kegelausfluege-'+new Date().toISOString().slice(0,10)+'.csv'); toast('CSV erstellt.'); });
+
+  // ---------- Chronik / Mitgliederentwicklung ----------
+  let devEditId=null;
+  // Sortierschlüssel aus dem gemischten Datumstext ("1958", "01.01.1960", "Sept 1994", "Febr. 2019").
+  // Reihenfolge: Jahr, dann Monat, dann Tag. Einträge ohne erkennbares Jahr wandern ans Ende.
+  const DEV_MONTHS={jan:1,feb:2,'mär':3,maer:3,mrz:3,apr:4,mai:5,jun:6,jul:7,aug:8,sep:9,okt:10,nov:11,dez:12};
+  function devKey(s){ s=String(s||''); const my=s.match(/(1[89]\d{2}|20\d{2})/); if(!my)return 99990000;
+    const year=+my[1]; let mm=0,dd=0; const md=s.match(/(\d{1,2})\.(\d{1,2})\.\d{4}/);
+    if(md){ dd=+md[1]; mm=+md[2]; } else { const mo=s.toLowerCase().match(/jan|feb|mär|maer|mrz|apr|mai|jun|jul|aug|sep|okt|nov|dez/); if(mo)mm=DEV_MONTHS[mo[0]]||0; }
+    return year*10000+mm*100+dd; }
+  function developSorted(){ const desc=$("dev_desc")&&$("dev_desc").checked;
+    return develop.slice().sort((a,b)=>{ const ka=devKey(a.date),kb=devKey(b.date); return desc?((kb-ka)||(b.id-a.id)):((ka-kb)||(a.id-b.id)); }); }
+  function renderDevelop(){ const box=$("developList"); if(!box)return; const manage=!!(me&&effManage());
+    const addBtn=$("dev_add"); if(addBtn)addBtn.classList.toggle("hidden",!manage);
+    if(!develop.length){ box.innerHTML='<div class="prizeempty">Noch keine Chronik-Einträge.'+(manage?' Über „＋ Eintrag" den ersten anlegen.':'')+'</div>'; return; }
+    const rows=developSorted().map(d=>'<tr>'
+      +'<td class="ddate">'+esc(d.date||'—')+'</td>'
+      +'<td class="dtext">'+esc(d.description||'')+'</td>'
+      +'<td class="dcount">'+(d.count==null?'<span class="muted2">–</span>':esc(d.count))+'</td>'
+      +(manage?'<td class="tactions"><button class="btn sm" type="button" data-dedit="'+d.id+'">Bearbeiten</button> <button class="btn warn sm" type="button" data-ddel="'+d.id+'">Löschen</button></td>':'')
+      +'</tr>').join("");
+    box.innerHTML='<div class="tablewrap"><table class="triptable"><thead><tr><th>Datum</th><th>Beschreibung</th><th>akt. Mitgl.</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+    box.querySelectorAll('[data-dedit]').forEach(b=>b.addEventListener("click",e=>{ e.preventDefault(); openDevelopEdit(Number(b.dataset.dedit)); }));
+    box.querySelectorAll('[data-ddel]').forEach(b=>b.addEventListener("click",e=>{ e.preventDefault(); const d=develop.find(x=>x.id===Number(b.dataset.ddel));
+      if(confirm('Eintrag „'+(d?((d.date?d.date+' – ':'')+(d.description||'')).slice(0,60):'')+'" wirklich löschen?')) opStruct({type:'removeDevelop',id:Number(b.dataset.ddel)}); }));
+  }
+  function openDevelopEdit(id){ if(!(me&&effManage()))return; const d=id!=null?develop.find(x=>x.id===id):null; devEditId=id!=null?id:null;
+    $("dv_title").textContent=d?"Eintrag bearbeiten":"Neuer Eintrag"; $("dv_err").textContent="";
+    $("dv_date").value=d?(d.date||""):""; $("dv_desc").value=d?(d.description||""):""; $("dv_count").value=(d&&d.count!=null)?d.count:"";
+    $("devdlg").classList.remove("hidden"); setTimeout(()=>$("dv_date").focus(),50);
+  }
+  function closeDevelopEdit(){ $("devdlg").classList.add("hidden"); devEditId=null; }
+  function saveDevelopEdit(){ if(!(me&&effManage())){closeDevelopEdit();return;}
+    $("dv_err").textContent="";
+    const date=$("dv_date").value.trim(); const description=$("dv_desc").value;
+    if(!date && !description.trim()){ $("dv_err").textContent="Bitte mindestens Datum oder Beschreibung angeben."; return; }
+    const cv=$("dv_count").value.trim(); const count=cv===""?null:cInt(cv,0,9999,NaN);
+    if(cv!=="" && !isFinite(count)){ $("dv_err").textContent="Mitgliederzahl muss eine Zahl von 0–9999 sein (oder leer)."; return; }
+    const entry={ date, description, count:(cv===""?null:count) };
+    if(devEditId!=null) opStruct({type:'updateDevelop',id:devEditId,entry});
+    else opStruct({type:'addDevelop',entry});
+    closeDevelopEdit(); toast("Gespeichert.");
+  }
+  $("dev_add").addEventListener("click",()=>openDevelopEdit(null));
+  $("dev_desc").addEventListener("change",renderDevelop);
+  $("dv_save").addEventListener("click",saveDevelopEdit);
+  $("dv_cancel").addEventListener("click",closeDevelopEdit);
+  $("devdlg").addEventListener("click",e=>{ if(e.target===$("devdlg"))closeDevelopEdit(); });
+  $("dev_export").addEventListener("click",()=>{ if(!develop.length){toast("Keine Einträge.");return;}
+    const head=["Datum","Beschreibung","aktuelle Mitglieder"];
+    const csvCell=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+    const rows=developSorted().map(d=>[d.date,d.description,d.count==null?'':d.count].map(csvCell).join(';'));
+    const csv='﻿'+[head.map(csvCell).join(';')].concat(rows).join('\r\n');
+    dlBlob(csv,'text/csv;charset=utf-8','KKk58-Mitgliederentwicklung-'+new Date().toISOString().slice(0,10)+'.csv'); toast('CSV erstellt.'); });
 
   // CSV-Export (aktuelle Filterung)
   function dirCurrentList(){ const ql=($("dir_search").value||"").trim().toLowerCase(); const showInactive=$("dir_inactive").checked;
