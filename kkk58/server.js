@@ -397,6 +397,23 @@ function buildGnuCash() {
 }
 function fmtD(s) { if (!s) return 'ohne Datum'; const p = String(s).split('-'); return p.length === 3 ? (p[2] + '.' + p[1] + '.' + p[0]) : String(s); }
 function fmtDT(ts) { const d = new Date(ts); const z = n => String(n).padStart(2, '0'); return z(d.getDate()) + '.' + z(d.getMonth() + 1) + '.' + d.getFullYear() + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()); }
+// Datenbank-Export als JSON. full=false: bereinigt (ohne Zugangsdaten), für jede angemeldete Rolle.
+// full=true: vollständige Sicherung inkl. Passwort-Hashes/Salts und Einladungs-Tokens – nur für Admins.
+function buildDbExport(full, byUser) {
+  const snap = JSON.parse(JSON.stringify(db)); // tiefe Kopie, Original bleibt unangetastet
+  if (!full) {
+    // Zugangsdaten entfernen: Passwort-Hash/Salt je Konto, komplette Einladungsliste (Einmal-Login-Tokens)
+    snap.users = (snap.users || []).map(u => ({
+      id: u.id, username: u.username, role: u.role, createdAt: u.createdAt,
+      rosterId: (u.rosterId != null ? u.rosterId : null),
+      mustChangePassword: !!u.mustChangePassword
+    }));
+    delete snap.invites;
+  }
+  snap._export = { at: Date.now(), by: (byUser && byUser.username) || null, full: !!full, version: db.version };
+  return JSON.stringify(snap, null, 2);
+}
+
 function buildExportHtml() {
   const st = computeStats();
   const span = (st.summary.from && st.summary.to) ? (fmtDT(st.summary.from).slice(0, 10) + ' – ' + fmtDT(st.summary.to).slice(0, 10)) : '';
@@ -593,6 +610,17 @@ function handle(req, res) {
     const fname = 'KKk58-Archiv-' + d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + '.html';
     return send(res, 200, buildExportHtml(), { 'Content-Type': 'text/html; charset=utf-8', 'Content-Disposition': 'attachment; filename="' + fname + '"', 'Cache-Control': 'no-store' });
   }
+  if (api === '/db' && req.method === 'GET') {
+    // Voll-Sicherung (mit Zugangsdaten) nur für Admins; sonst bereinigte Kopie für jede angemeldete Rolle.
+    const wantFull = u.searchParams.get('full') === '1';
+    const full = wantFull && me.role === 'admin';
+    if (wantFull && !full) return send(res, 403, { error: 'Vollständige Sicherung nur für Admins' });
+    const z = n => String(n).padStart(2, '0'); const d = new Date();
+    const stamp = d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate());
+    const fname = 'KKk58-Datenbank-' + stamp + (full ? '-voll' : '') + '.json';
+    return send(res, 200, buildDbExport(full, me), { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': 'attachment; filename="' + fname + '"', 'Cache-Control': 'no-store' });
+  }
+
   const mA = api.match(/^\/archive\/(\d+)$/);
   if (mA && req.method === 'GET') { const g = db.archive.find(a => a.id === Number(mA[1])); if (!g) return send(res, 404, { error: 'nicht gefunden' }); return send(res, 200, { game: { id: g.id, event: g.event, date: g.date, savedAt: g.savedAt, savedBy: g.savedBy, pumpen: g.pumpen, note: g.note }, eval: evalGame(g) }); }
   if (api === '/stats' && req.method === 'GET') return send(res, 200, computeStats());

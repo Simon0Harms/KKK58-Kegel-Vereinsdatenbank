@@ -375,7 +375,7 @@
 
   <!-- ===== ARCHIV ===== -->
   <section id="view_archive" class="hidden">
-    <div class="arctoolbar" id="arcToolbar"><button class="btn ghost sm" id="btn_export" type="button">⬇ Alle Spiele als HTML exportieren</button></div>
+    <div class="arctoolbar" id="arcToolbar"><button class="btn ghost sm" id="btn_export" type="button">⬇ Alle Spiele als HTML exportieren</button><button class="btn ghost sm" id="btn_dbdl" type="button" title="Vereinsdatenbank als JSON herunterladen (ohne Zugangsdaten)">⬇ Datenbank herunterladen (JSON)</button><button class="btn ghost sm hidden" id="btn_dbfull" type="button" title="Vollständige Sicherung inkl. Zugangsdaten – nur Admin">⬇ Voll-Sicherung (mit Zugangsdaten)</button></div>
     <div id="arcList"></div>
     <div id="arcDetail" class="hidden"></div>
   </section>
@@ -801,6 +801,7 @@
 
   // ---------- Archiv ----------
   async function loadArchive(){ $("arcDetail").classList.add("hidden"); $("arcList").classList.remove("hidden"); $("arcToolbar").style.display="";
+    $("btn_dbfull").classList.toggle("hidden", !(me&&me.role==='admin'));
     const r=await api('/archive'); if(!r.ok){ $("arcList").innerHTML='<div class="arcempty">Konnte Archiv nicht laden.</div>'; $("arcToolbar").style.display="none"; return; }
     const a=r.data.archive||[];
     if(!a.length){ $("arcList").innerHTML='<div class="arcempty">Noch keine gespeicherten Spiele.</div>'; $("arcToolbar").style.display="none"; return; }
@@ -826,6 +827,21 @@
     finally{ if(btn)btn.disabled=false; }
   }
   $("btn_export").addEventListener("click",exportHtml);
+  async function downloadDb(full){
+    const btn=full?$("btn_dbfull"):$("btn_dbdl"); if(btn)btn.disabled=true;
+    try{
+      const r=await fetch(BASE+'/api/db'+(full?'?full=1':''),{credentials:'same-origin',headers:{'X-Requested-With':'fetch'}});
+      if(!r.ok){ toast(r.status===401?'Bitte neu anmelden':(r.status===403?'Keine Berechtigung':'Download fehlgeschlagen')); return; }
+      const blob=await r.blob(); const url=URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url;
+      a.download='KKk58-Datenbank-'+new Date().toISOString().slice(0,10)+(full?'-voll':'')+'.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),2000); toast('Datenbank heruntergeladen.');
+    }catch(_){ toast('Download fehlgeschlagen'); }
+    finally{ if(btn)btn.disabled=false; }
+  }
+  $("btn_dbdl").addEventListener("click",()=>downloadDb(false));
+  $("btn_dbfull").addEventListener("click",()=>{ if(confirm("Vollständige Sicherung enthält Passwort-Hashes und Einladungs-Tokens. Nur sicher aufbewahren. Fortfahren?")) downloadDb(true); });
   async function openGame(id){ const r=await api('/archive/'+id); if(!r.ok){toast("Spiel nicht gefunden");return;}
     $("arcToolbar").style.display="none";
     const g=r.data.game, ev=r.data.eval; const d=g.date?new Date(g.date+"T00:00:00").toLocaleDateString("de-DE"):'ohne Datum';

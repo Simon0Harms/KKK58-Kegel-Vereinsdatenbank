@@ -262,6 +262,17 @@ Spiel ins Archiv übernommen.
   offline nutzbar und druckbar). Sie enthält eine Kopf-Zusammenfassung, die Gesamtstatistik
   und alle Spiele chronologisch mit voller Detailtabelle (inkl. Ankunft und Kasse).
   Der Export wird **serverseitig** aus denselben Daten erzeugt (`GET /api/export`).
+- Der Button **„⬇ Datenbank herunterladen (JSON)"** (ebenfalls oben im Archiv-Tab) lädt die
+  komplette Vereinsdatenbank als JSON herunter (`KKk58-Datenbank-JJJJ-MM-TT.json`). Er ist für
+  **alle angemeldeten Rollen** verfügbar. Diese Fassung ist **bereinigt**: Passwort-Hashes und
+  -Salts der Konten sowie die Einladungs-Tokens (Einmal-Login) sind **entfernt** – Konten
+  erscheinen nur mit `id`, `username`, `role`, `createdAt`, `rosterId`, `mustChangePassword`.
+  Endpunkt `GET /api/db` (angemeldet).
+- Für **Admins** erscheint zusätzlich **„⬇ Voll-Sicherung (mit Zugangsdaten)"**
+  (`KKk58-Datenbank-JJJJ-MM-TT-voll.json`, Endpunkt `GET /api/db?full=1`). Diese Sicherung
+  enthält **Passwort-Hashes/Salts und Einladungs-Tokens** und ist damit restaurierbar, aber
+  sensibel – bitte nur geschützt aufbewahren. Nicht-Admins erhalten auf `full=1` **403**.
+  Beiden Downloads wird ein Feld `_export` (Zeitpunkt, Ersteller, `full`, `version`) angehängt.
 
 ### Statistik
 Tab **„Statistik"** wertet **alle** archivierten Spiele je Spieler aus:
