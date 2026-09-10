@@ -503,6 +503,39 @@ Speicherung als `polls`/`seqPolls` in `data/db.json` (Stimmen je `userId`); Änd
 die Live-Sync-Operationen `addPoll` / `votePoll` / `closePoll` / `removePoll` und erscheinen sofort
 bei allen angemeldeten Mitgliedern.
 
+## Kalender / Termine
+
+Der Reiter **„Kalender"** zeigt die **heutigen und kommenden Termine** des Vereins als einfache
+Liste **Datum | Beschreibung** (nach Datum sortiert, der heutige Tag ist markiert). Der Zeithorizont
+umfasst die nächsten **12 Monate**.
+
+- **Geburtstage:** Zusätzlich werden die **Geburtstage** aller aktiven Mitglieder eingeblendet –
+  automatisch abgeleitet aus dem Feld `geburtsdatum` im **Mitgliedsverzeichnis** (mit Angabe, welches
+  Alter erreicht wird). Über den Schalter **„Geburtstage"** lassen sie sich aus- und einblenden.
+  Gepflegt werden die Geburtstage im Verzeichnis, nicht im Kalender.
+- **Ort:** Je Termin lässt sich optional ein **Ort** angeben (z. B. „Kegelbahn LTSV"); er erscheint
+  in der Liste und im iCal-Export (`LOCATION`).
+- **Termine anlegen/bearbeiten/löschen:** Nur mit **Verwaltungsrecht** (Admin, Kassenwart, Mitglied)
+  – wie bei Preisen, Ausflügen und Chronik. Die Gruppe **„beschränkt" hat nur lesenden Zugriff**
+  (sie sieht den Kalender und kann iCal herunterladen, aber nichts ändern). Unter der Terminliste
+  steht für Berechtigte der Block **„Termine verwalten"** mit „＋ Termin", Bearbeiten und Löschen.
+- **Wiederkehrende Termine:** Je Termin ist eine **Wiederholung** wählbar – **einmalig**,
+  **wöchentlich**, **alle zwei Wochen**, **monatlich** oder **jährlich** – mit optionalem
+  **Enddatum** („Wiederholen bis"). Die Vorkommen werden aus dem Starttermin berechnet; nur die
+  künftigen (ab heute) werden angezeigt.
+- **iCal-Export (.ics):** **Jedes angemeldete Konto** (auch „beschränkt") kann einen Termin über
+  **„⬇ iCal"** herunterladen und in den eigenen Kalender (Google, Apple, Outlook …) importieren.
+  Der Button **„⬇ iCal"** in der Kopfzeile exportiert **alle** Termine auf einmal (inkl. Geburtstage,
+  wenn deren Anzeige eingeschaltet ist). Bei einem **wiederkehrenden Termin** wird stets die
+  **komplette Terminreihe** exportiert (als **RRULE**, nicht nur das angeklickte Vorkommen) – der
+  Button ist dort mit **„⬇ iCal (Reihe)"** gekennzeichnet. Ganztagestermine werden als
+  `VALUE=DATE` exportiert; die Datei wird abhängigkeitsfrei im Browser erzeugt.
+
+Speicherung als `events`/`seqEvents` in `data/db.json` (Felder `date`, `text`, `place`, `repeat`,
+`until`); Änderungen laufen über die Live-Sync-Operationen `addEvent` / `updateEvent` /
+`removeEvent` und erscheinen sofort bei allen angemeldeten Mitgliedern. Beim Update einer
+bestehenden Datenbank ohne diese Felder startet der Kalender leer.
+
 ## GnuCash-Export
 
 In der Kasse gibt es den Button **„⬇ GnuCash-Export (.gnucash)"**. Er ist für **alle

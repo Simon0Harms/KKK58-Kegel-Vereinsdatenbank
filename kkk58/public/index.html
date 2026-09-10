@@ -267,6 +267,14 @@
   .triptable td.dtext{white-space:pre-wrap;min-width:200px}
   .triptable td.dcount{text-align:center;font-variant-numeric:tabular-nums;font-weight:700}
   .triptable td.dcount .muted2{font-weight:400}
+  .triptable tr.caltoday td{background:rgba(29,107,87,.12)}
+  .triptable tr.caltoday td.ddate{color:var(--accent,#1d6b57)}
+  .calh3{margin:22px 0 8px;font-size:1rem}
+  .calbadge{display:inline-block;font-size:.68rem;font-weight:700;letter-spacing:.03em;padding:1px 7px;border-radius:999px;vertical-align:middle;white-space:nowrap}
+  .calbadge.bd{background:#fbe7d1;color:#8a4b0d}
+  .calbadge.rep{background:#e3edf9;color:#2a5580}
+  .calbadge.today{background:#1d6b57;color:#fff;margin-left:4px}
+  .calplace{color:var(--muted);font-size:.85em;white-space:nowrap}
   .polllist{display:flex;flex-direction:column;gap:12px}
   .pollcard{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px}
   .pollcard.closed{opacity:.85}
@@ -413,6 +421,7 @@
       <button id="nav_prizes" type="button">Preise</button>
       <button id="nav_trips" type="button">Ausflüge</button>
       <button id="nav_develop" type="button">Chronik</button>
+      <button id="nav_cal" type="button">Kalender</button>
       <button id="nav_polls" type="button">Abstimmungen</button>
       <button id="nav_cash" type="button" class="hidden">Kasse</button>
       <div class="btnrow" id="sheetBtns">
@@ -585,6 +594,20 @@
     <div id="pollList" class="polllist"></div>
     <p class="foot" id="pollFoot" style="text-align:left">Jedes angemeldete Mitglied kann eine Abstimmung starten und mit Ja oder Nein antworten. Neue Abstimmungen werden im Matrix-Vereinsraum angekündigt; wöchentlich wird an alle erinnert, die noch nicht abgestimmt haben.</p>
   </section>
+
+  <!-- ===== KALENDER / TERMINE ===== -->
+  <section id="view_cal" class="hidden">
+    <div class="dirbar">
+      <span class="prizeintro">Heutige und kommende Termine des Vereins – inklusive der Geburtstage aus dem Mitgliedsverzeichnis.</span>
+      <span style="flex:1"></span>
+      <label class="chip" id="cal_bd_lbl" title="Geburtstage der Mitglieder mit anzeigen"><input type="checkbox" id="cal_show_bd" checked>Geburtstage</label>
+      <button class="btn ghost sm" id="cal_ical_all" type="button" title="Alle Termine als iCal-Datei (.ics) für den eigenen Kalender herunterladen">⬇ iCal</button>
+      <button class="btn prim sm hidden" id="cal_add" type="button">＋ Termin</button>
+    </div>
+    <div id="calUpcoming"></div>
+    <div id="calManage"></div>
+    <p class="foot" id="calFoot" style="text-align:left">Die Terminliste ist für alle angemeldeten Mitglieder sichtbar; jeder kann einen Termin über „⬇ iCal" für den eigenen Kalender herunterladen. Anlegen, Bearbeiten und Löschen nur mit Verwaltungsrecht (Admin, Kassenwart, Mitglied) – „beschränkt" hat nur lesenden Zugriff. Geburtstage werden automatisch aus dem Verzeichnis übernommen und dort gepflegt.</p>
+  </section>
 </div>
 
 <!-- VERZEICHNIS: Bearbeiten-Dialog -->
@@ -691,6 +714,34 @@
   </div>
 </div>
 
+<!-- KALENDER: Termin-Dialog -->
+<div id="caldlg" class="ovl hidden">
+  <div class="login dirdlg">
+    <div class="eyebrow">Termine</div>
+    <h1 id="ca_title">Termin bearbeiten</h1>
+    <div class="dirgrid">
+      <div class="fld"><label>Datum</label><input id="ca_date" type="date"></div>
+      <div class="fld"><label>Wiederholung</label>
+        <select id="ca_repeat">
+          <option value="none" selected>einmalig</option>
+          <option value="weekly">wöchentlich</option>
+          <option value="biweekly">alle zwei Wochen</option>
+          <option value="monthly">monatlich</option>
+          <option value="yearly">jährlich</option>
+        </select>
+      </div>
+      <div class="fld dirfull"><label>Beschreibung</label><input id="ca_text" type="text" maxlength="200" placeholder="z. B. Kegelabend, Jahreshauptversammlung …"></div>
+      <div class="fld dirfull"><label>Ort (optional)</label><input id="ca_place" type="text" maxlength="120" placeholder="z. B. Kegelbahn LTSV, Vereinsheim …"></div>
+      <div class="fld dirfull" id="ca_untilwrap" style="display:none"><label>Wiederholen bis (optional)</label><input id="ca_until" type="date"></div>
+    </div>
+    <div class="dderr err" id="ca_err"></div>
+    <div class="ddrow">
+      <button class="btn prim" id="ca_save" type="button">Speichern</button>
+      <button class="btn" id="ca_cancel" type="button">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
 <!-- KASSE: Buchungs-Dialog -->
 <div id="cashdlg" class="ovl hidden">
   <div class="login">
@@ -736,7 +787,7 @@
   const canManage=r=>r==="admin"||r==="kassenwart"||r==="mitglied";
   const canCash=r=>r==="admin"||r==="kassenwart";
   const roleLabel=r=>ROLE_LABEL[r]||r;
-  let me=null, state=null, roster=[], prizes=[], trips=[], develop=[], polls=[], version=0, es=null, currentView="sheet", sortMode="arrival";
+  let me=null, state=null, roster=[], prizes=[], trips=[], develop=[], events=[], polls=[], version=0, es=null, currentView="sheet", sortMode="arrival";
   const pending=new Set();
   const rid=()=> (crypto.randomUUID? crypto.randomUUID() : String(Date.now())+Math.random());
   const $=id=>document.getElementById(id);
@@ -780,7 +831,7 @@
     $("adminPanel").hidden=!manage; $("nav_cash").classList.remove("hidden");
     const seg=$("rvSeg"); if(seg) seg.querySelectorAll("button").forEach(b=>b.classList.toggle("active", b.dataset.vr===eff));
     $("rvNote").textContent = viewRole ? "Nur Vorschau – deine echten Rechte bleiben Admin." : "";
-    renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderPolls(); if(currentView==="archive") loadArchive(); if(currentView==="cash"&&cashData) renderCash(); }
+    renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); if(currentView==="archive") loadArchive(); if(currentView==="cash"&&cashData) renderCash(); }
   function setViewRole(r){ if(!(me&&me.role==='admin'))return; viewRole = (r==='admin'||r===me.role) ? null : r; applyRoleUI(); }
   function showApp(){ $("view_invite").classList.add("hidden"); $("view_login").classList.add("hidden"); $("view_app").classList.remove("hidden");
     if(!(me&&me.role==='admin')) viewRole=null;
@@ -914,7 +965,7 @@
   $("pw_new2").addEventListener("keydown",e=>{if(e.key==='Enter')submitPw();});
 
   async function loadState(){ const r=await api('/state');
-    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; polls=r.data.polls||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderPolls(); loadLog();
+    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; events=r.data.events||[]; polls=r.data.polls||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog();
       if(me&&me.mustChangePassword&&$("pwdlg").classList.contains("hidden")) openPwDialog(); }
     else if(r.status===401) showLogin(); }
   function resync(){ loadState(); }
@@ -930,6 +981,7 @@
     $("view_prizes").classList.toggle("hidden",v!=="prizes");
     $("view_trips").classList.toggle("hidden",v!=="trips");
     $("view_develop").classList.toggle("hidden",v!=="develop");
+    $("view_cal").classList.toggle("hidden",v!=="cal");
     $("view_polls").classList.toggle("hidden",v!=="polls");
     $("sheetBtns").style.display = v==="sheet" ? "" : "none";
     $("nav_sheet").classList.toggle("active",v==="sheet");
@@ -940,6 +992,7 @@
     $("nav_prizes").classList.toggle("active",v==="prizes");
     $("nav_trips").classList.toggle("active",v==="trips");
     $("nav_develop").classList.toggle("active",v==="develop");
+    $("nav_cal").classList.toggle("active",v==="cal");
     $("nav_polls").classList.toggle("active",v==="polls");
     if(v==="archive") loadArchive();
     if(v==="stats") loadStats();
@@ -948,6 +1001,7 @@
     if(v==="prizes") renderPrizes();
     if(v==="trips") renderTrips();
     if(v==="develop") renderDevelop();
+    if(v==="cal") renderCal();
     if(v==="polls") renderPolls();
   }
   // Fokus-Modus: nur die Liste zum Eintragen (Menü/Kopf ausgeblendet)
@@ -961,6 +1015,7 @@
   $("nav_prizes").addEventListener("click",()=>setView("prizes"));
   $("nav_trips").addEventListener("click",()=>setView("trips"));
   $("nav_develop").addEventListener("click",()=>setView("develop"));
+  $("nav_cal").addEventListener("click",()=>setView("cal"));
   $("nav_polls").addEventListener("click",()=>setView("polls"));
   $("rvSeg").addEventListener("click",e=>{ const b=e.target.closest("button[data-vr]"); if(b)setViewRole(b.dataset.vr); });
   $("btn_focus").addEventListener("click",()=>setFocus(true));
@@ -972,7 +1027,7 @@
     es.onopen=()=>$("conn").classList.remove("off");
     es.onerror=()=>$("conn").classList.add("off");
     es.onmessage=ev=>{ let m; try{m=JSON.parse(ev.data);}catch(_){return;}
-      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; prizes=m.prizes||prizes; trips=m.trips||trips; develop=m.develop||develop; polls=m.polls||polls; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderPolls(); loadLog(); return; }
+      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; prizes=m.prizes||prizes; trips=m.trips||trips; develop=m.develop||develop; events=m.events||events; polls=m.polls||polls; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog(); return; }
       applyRemote(m); }; }
   function applyRemote(m){
     if(typeof m.v!=='number')return;
@@ -1001,11 +1056,11 @@
       case 'counterDelta': { const p=P(op.id); if(p){p[op.key]=Math.max(0,(p[op.key]||0)+op.delta); setInput('ctr:'+op.id+':'+op.key,p[op.key]);} break; }
       case 'setScore': { const p=P(op.id); if(p){p[op.key]=op.value; setInput('score:'+op.id+':'+op.key,op.value==null?'':op.value);} break; }
       case 'addRoster': if(!roster.some(r=>r.id===op.person.id)){roster.push(op.person);rebuildDatalist();renderRosterAdmin();renderDirectory();} return;
-      case 'renameRoster': { const r=roster.find(x=>x.id===op.id); if(r)r.name=op.name; state.players.forEach(p=>{if(p.rosterId===op.id)p.name=op.name;}); rebuildDatalist(); renderRosterAdmin(); renderDirectory(); renderAll(); return; }
-      case 'setRosterActive': { const r=roster.find(x=>x.id===op.id); if(r){r.active=op.active; r.leftAt=op.leftAt||null;} rebuildDatalist(); renderRosterAdmin(); renderDirectory(); return; }
+      case 'renameRoster': { const r=roster.find(x=>x.id===op.id); if(r)r.name=op.name; state.players.forEach(p=>{if(p.rosterId===op.id)p.name=op.name;}); rebuildDatalist(); renderRosterAdmin(); renderDirectory(); renderCal(); renderAll(); return; }
+      case 'setRosterActive': { const r=roster.find(x=>x.id===op.id); if(r){r.active=op.active; r.leftAt=op.leftAt||null;} rebuildDatalist(); renderRosterAdmin(); renderDirectory(); renderCal(); return; }
       case 'setRosterDues': { const r=roster.find(x=>x.id===op.id); if(r){r.duesLiable=op.duesLiable;} renderRosterAdmin(); return; }
-      case 'setRosterContact': { const r=roster.find(x=>x.id===op.id); if(r&&op.fields){ Object.keys(op.fields).forEach(k=>{ r[k]=op.fields[k]; }); } renderDirectory(); return; }
-      case 'removeRoster': roster=roster.filter(x=>x.id!==op.id); rebuildDatalist(); renderRosterAdmin(); renderDirectory(); return;
+      case 'setRosterContact': { const r=roster.find(x=>x.id===op.id); if(r&&op.fields){ Object.keys(op.fields).forEach(k=>{ r[k]=op.fields[k]; }); } renderDirectory(); renderCal(); return; }
+      case 'removeRoster': roster=roster.filter(x=>x.id!==op.id); rebuildDatalist(); renderRosterAdmin(); renderDirectory(); renderCal(); return;
       case 'archiveChanged': if(currentView==='archive')loadArchive(); if(currentView==='stats')loadStats(); return;
       case 'addPrize': if(op.prize && !prizes.some(p=>p.id===op.prize.id)) prizes.push(op.prize); renderPrizes(); return;
       case 'updatePrize': { const i=prizes.findIndex(p=>p.id===op.id); if(i>=0 && op.prize) prizes[i]=op.prize; renderPrizes(); return; }
@@ -1016,6 +1071,9 @@
       case 'addDevelop': if(op.entry && !develop.some(d=>d.id===op.entry.id)) develop.push(op.entry); renderDevelop(); return;
       case 'updateDevelop': { const i=develop.findIndex(d=>d.id===op.id); if(i>=0 && op.entry) develop[i]=op.entry; renderDevelop(); return; }
       case 'removeDevelop': develop=develop.filter(d=>d.id!==op.id); renderDevelop(); return;
+      case 'addEvent': if(op.event && !events.some(e=>e.id===op.event.id)) events.push(op.event); renderCal(); return;
+      case 'updateEvent': { const i=events.findIndex(e=>e.id===op.id); if(i>=0 && op.event) events[i]=op.event; renderCal(); return; }
+      case 'removeEvent': events=events.filter(e=>e.id!==op.id); renderCal(); return;
       case 'addPoll': case 'votePoll': case 'closePoll': { if(op.poll){ const i=polls.findIndex(p=>p.id===op.poll.id); if(i>=0)polls[i]=op.poll; else polls.push(op.poll); } renderPolls(); return; }
       case 'removePoll': polls=polls.filter(p=>p.id!==op.id); renderPolls(); return;
     }
@@ -1449,6 +1507,159 @@
     const rows=developSorted().map(d=>[d.date,d.description,d.count==null?'':d.count].map(csvCell).join(';'));
     const csv='﻿'+[head.map(csvCell).join(';')].concat(rows).join('\r\n');
     dlBlob(csv,'text/csv;charset=utf-8','KKk58-Mitgliederentwicklung-'+new Date().toISOString().slice(0,10)+'.csv'); toast('CSV erstellt.'); });
+
+  // ---------- Kalender / Termine ----------
+  let calEditId=null;
+  const REPEAT_LABEL={none:"einmalig",weekly:"wöchentlich",biweekly:"alle zwei Wochen",monthly:"monatlich",yearly:"jährlich"};
+  const WDAY=["So","Mo","Di","Mi","Do","Fr","Sa"];
+  function calShowBd(){ const c=$("cal_show_bd"); return !c||c.checked; }
+  function calToday(){ const d=new Date(); d.setHours(0,0,0,0); return d; }
+  function parseYMD(s){ const p=String(s||"").split("-"); if(p.length!==3)return null; const d=new Date(+p[0],+p[1]-1,+p[2]); return isNaN(d.getTime())?null:d; }
+  function toYMD(d){ const z=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+z(d.getMonth()+1)+"-"+z(d.getDate()); }
+  function stepRepeat(d,rep){ const n=new Date(d); if(rep==="weekly")n.setDate(n.getDate()+7); else if(rep==="biweekly")n.setDate(n.getDate()+14); else if(rep==="monthly")n.setMonth(n.getMonth()+1); else if(rep==="yearly")n.setFullYear(n.getFullYear()+1); else return null; return n; }
+  // Anstehende Vorkommen: Termine (mit Wiederholung bis zum Horizont/until) + optional Geburtstage.
+  // Horizont = heute + 1 Jahr. Die Geburtstage kommen aus dem Verzeichnis (geburtsdatum), nur aktive Mitglieder.
+  function calOccurrences(){
+    const today=calToday(); const horizon=new Date(today); horizon.setFullYear(horizon.getFullYear()+1);
+    const out=[];
+    events.forEach(ev=>{
+      const start=parseYMD(ev.date); if(!start)return;
+      const until=(ev.repeat!=="none"&&ev.until)?parseYMD(ev.until):null;
+      if(ev.repeat==="none"){
+        if(start>=today && start<=horizon) out.push({date:toYMD(start),d:new Date(start),text:ev.text,place:ev.place||"",kind:"event",repeat:"none",eid:ev.id});
+        return;
+      }
+      let cur=new Date(start), guard=0;
+      while(cur<today && guard<6000){ const nx=stepRepeat(cur,ev.repeat); if(!nx)break; cur=nx; guard++; }
+      while(cur<=horizon && (!until||cur<=until) && guard<6000){
+        out.push({date:toYMD(cur),d:new Date(cur),text:ev.text,place:ev.place||"",kind:"event",repeat:ev.repeat,eid:ev.id});
+        const nx=stepRepeat(cur,ev.repeat); if(!nx)break; cur=nx; guard++;
+      }
+    });
+    if(calShowBd()){
+      roster.filter(r=>r.active!==false && r.geburtsdatum).forEach(r=>{
+        const bd=parseYMD(r.geburtsdatum); if(!bd)return;
+        for(let yr=today.getFullYear(); yr<=horizon.getFullYear(); yr++){
+          const occ=new Date(yr,bd.getMonth(),bd.getDate());
+          if(occ>=today && occ<=horizon){ const age=yr-bd.getFullYear();
+            out.push({date:toYMD(occ),d:occ,text:"🎂 "+r.name+(age>0?" (wird "+age+")":""),kind:"birthday",repeat:"yearly"}); }
+        }
+      });
+    }
+    out.sort((a,b)=> a.date<b.date?-1 : a.date>b.date?1 : (a.kind==="birthday"?-1:1));
+    return out;
+  }
+  function renderCal(){
+    const box=$("calUpcoming"); if(!box)return; const manage=!!(me&&effManage());
+    const addBtn=$("cal_add"); if(addBtn)addBtn.classList.toggle("hidden",!manage);
+    const todayY=toYMD(calToday());
+    const occ=calOccurrences();
+    if(!occ.length){ box.innerHTML='<div class="prizeempty">Keine anstehenden Termine.'+(manage?' Über „＋ Termin" den ersten anlegen.':'')+'</div>'; }
+    else {
+      const rows=occ.map(o=>{
+        const isToday=o.date===todayY;
+        const badge=o.kind==="birthday"?'<span class="calbadge bd">Geburtstag</span>':(o.repeat!=="none"?'<span class="calbadge rep">'+REPEAT_LABEL[o.repeat]+'</span>':'');
+        const place=o.place?' <span class="calplace">📍 '+esc(o.place)+'</span>':'';
+        const dl=o.kind==="event"?'<button class="btn ghost sm" type="button" title="'+(o.repeat!=="none"?"Komplette Terminreihe als iCal (.ics) herunterladen":"Diesen Termin als iCal (.ics) herunterladen")+'" data-caical="'+o.eid+'">⬇ iCal'+(o.repeat!=="none"?" (Reihe)":"")+'</button>':'';
+        return '<tr'+(isToday?' class="caltoday"':'')+'>'
+          +'<td class="ddate" style="white-space:nowrap">'+WDAY[o.d.getDay()]+' '+esc(fmtLeft(o.date))+(isToday?' <span class="calbadge today">heute</span>':'')+'</td>'
+          +'<td class="dtext">'+esc(o.text)+' '+badge+place+'</td>'
+          +'<td class="tactions">'+dl+'</td></tr>';
+      }).join("");
+      box.innerHTML='<div class="tablewrap"><table class="triptable"><thead><tr><th>Datum</th><th>Beschreibung</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+      box.querySelectorAll('[data-caical]').forEach(b=>b.addEventListener("click",e=>{e.preventDefault();downloadEventIcal(Number(b.dataset.caical));}));
+    }
+    renderCalManage(manage);
+  }
+  function renderCalManage(manage){
+    const box=$("calManage"); if(!box)return;
+    if(!manage){ box.innerHTML=""; return; }
+    if(!events.length){ box.innerHTML='<h3 class="calh3">Termine verwalten</h3><div class="prizeempty">Noch keine Termine angelegt.</div>'; return; }
+    const list=events.slice().sort((a,b)=> a.date<b.date?-1:a.date>b.date?1:0);
+    const rows=list.map(e=>'<tr>'
+      +'<td class="ddate" style="white-space:nowrap">'+esc(fmtLeft(e.date))+'</td>'
+      +'<td class="dtext">'+esc(e.text)+(e.place?' <span class="calplace">📍 '+esc(e.place)+'</span>':'')+'</td>'
+      +'<td class="dcount">'+(e.repeat==="none"?'<span class="muted2">einmalig</span>':esc(REPEAT_LABEL[e.repeat])+(e.until?' bis '+esc(fmtLeft(e.until)):''))+'</td>'
+      +'<td class="tactions"><button class="btn ghost sm" type="button" title="'+(e.repeat!=="none"?"Komplette Terminreihe als iCal (.ics) herunterladen":"Als iCal (.ics) herunterladen")+'" data-caical="'+e.id+'">⬇ iCal'+(e.repeat!=="none"?" (Reihe)":"")+'</button> <button class="btn sm" type="button" data-caedit="'+e.id+'">Bearbeiten</button> <button class="btn warn sm" type="button" data-cadel="'+e.id+'">Löschen</button></td>'
+      +'</tr>').join("");
+    box.innerHTML='<h3 class="calh3">Termine verwalten</h3><div class="tablewrap"><table class="triptable"><thead><tr><th>Datum</th><th>Beschreibung</th><th>Wiederholung</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    box.querySelectorAll('[data-caical]').forEach(b=>b.addEventListener("click",e=>{e.preventDefault();downloadEventIcal(Number(b.dataset.caical));}));
+    box.querySelectorAll('[data-caedit]').forEach(b=>b.addEventListener("click",e=>{e.preventDefault();openCalEdit(Number(b.dataset.caedit));}));
+    box.querySelectorAll('[data-cadel]').forEach(b=>b.addEventListener("click",e=>{e.preventDefault(); const ev=events.find(x=>x.id===Number(b.dataset.cadel));
+      if(confirm('Termin „'+(ev?((ev.date?fmtLeft(ev.date)+' – ':'')+(ev.text||'')).slice(0,60):'')+'" wirklich löschen?')) opStruct({type:'removeEvent',id:Number(b.dataset.cadel)}); }));
+  }
+  function openCalEdit(id){ if(!(me&&effManage()))return; const ev=id!=null?events.find(x=>x.id===id):null; calEditId=id!=null?id:null;
+    $("ca_title").textContent=ev?"Termin bearbeiten":"Neuer Termin"; $("ca_err").textContent="";
+    $("ca_date").value=ev?(ev.date||""):toYMD(calToday());
+    $("ca_text").value=ev?(ev.text||""):"";
+    $("ca_place").value=ev?(ev.place||""):"";
+    $("ca_repeat").value=ev?(ev.repeat||"none"):"none";
+    $("ca_until").value=(ev&&ev.until)?ev.until:"";
+    $("ca_untilwrap").style.display=($("ca_repeat").value!=="none")?"":"none";
+    $("caldlg").classList.remove("hidden"); setTimeout(()=>$("ca_date").focus(),50);
+  }
+  function closeCalEdit(){ $("caldlg").classList.add("hidden"); calEditId=null; }
+  function saveCalEdit(){ if(!(me&&effManage())){closeCalEdit();return;}
+    $("ca_err").textContent="";
+    const date=$("ca_date").value; if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ $("ca_err").textContent="Bitte ein gültiges Datum wählen."; return; }
+    const text=$("ca_text").value.trim(); if(!text){ $("ca_err").textContent="Bitte eine Beschreibung eingeben."; return; }
+    const place=$("ca_place").value.trim();
+    const repeat=$("ca_repeat").value; const untilRaw=$("ca_until").value; let until=null;
+    if(repeat!=="none" && untilRaw){ if(!/^\d{4}-\d{2}-\d{2}$/.test(untilRaw)){ $("ca_err").textContent="Enddatum ungültig."; return; }
+      if(untilRaw<date){ $("ca_err").textContent="Das Enddatum darf nicht vor dem Startdatum liegen."; return; } until=untilRaw; }
+    const event={ date, text, place, repeat, until };
+    if(calEditId!=null) opStruct({type:'updateEvent',id:calEditId,event});
+    else opStruct({type:'addEvent',event});
+    closeCalEdit(); toast("Gespeichert.");
+  }
+  $("cal_add").addEventListener("click",()=>openCalEdit(null));
+  $("cal_show_bd").addEventListener("change",renderCal);
+  $("ca_repeat").addEventListener("change",()=>{ $("ca_untilwrap").style.display=($("ca_repeat").value!=="none")?"":"none"; });
+  $("ca_save").addEventListener("click",saveCalEdit);
+  $("ca_cancel").addEventListener("click",closeCalEdit);
+  $("caldlg").addEventListener("click",e=>{ if(e.target===$("caldlg"))closeCalEdit(); });
+
+  // iCal / .ics-Export (abhängigkeitsfrei; Herunterladen dürfen alle Angemeldeten, auch „beschränkt").
+  // Ganztägige Termine (VALUE=DATE); Wiederholungen als RRULE, damit sie im eigenen Kalender wiederkehren.
+  function icsEsc(s){ return String(s==null?"":s).replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\r?\n/g,"\\n"); }
+  function icsDate(ymd){ return String(ymd||"").replace(/-/g,""); }
+  function icsStampNow(){ const d=new Date(); const z=n=>String(n).padStart(2,"0"); return d.getUTCFullYear()+z(d.getUTCMonth()+1)+z(d.getUTCDate())+"T"+z(d.getUTCHours())+z(d.getUTCMinutes())+z(d.getUTCSeconds())+"Z"; }
+  function icsAddDay(ymd){ const d=parseYMD(ymd); if(!d)return icsDate(ymd); d.setDate(d.getDate()+1); return icsDate(toYMD(d)); }
+  const ICS_FREQ={weekly:"WEEKLY",biweekly:"WEEKLY",monthly:"MONTHLY",yearly:"YEARLY"};
+  function icsRRule(ev){ const f=ICS_FREQ[ev.repeat]; if(!f)return null; let r="RRULE:FREQ="+f; if(ev.repeat==="biweekly")r+=";INTERVAL=2"; if(ev.until)r+=";UNTIL="+icsAddDay(ev.until); return r; }
+  function icsHost(){ return (location.host||"kkk58").replace(/[^\w.-]/g,"-")||"kkk58"; }
+  function icsVevent(ev){
+    let v="BEGIN:VEVENT\r\n";
+    v+="UID:kkk58-event-"+ev.id+"@"+icsHost()+"\r\n";
+    v+="DTSTAMP:"+icsStampNow()+"\r\n";
+    v+="DTSTART;VALUE=DATE:"+icsDate(ev.date)+"\r\n";
+    v+="DTEND;VALUE=DATE:"+icsAddDay(ev.date)+"\r\n";
+    v+="SUMMARY:"+icsEsc(ev.text)+"\r\n";
+    if(ev.place)v+="LOCATION:"+icsEsc(ev.place)+"\r\n";
+    const rr=icsRRule(ev); if(rr)v+=rr+"\r\n";
+    return v+"END:VEVENT\r\n";
+  }
+  function icsBirthdayVevent(r){
+    let v="BEGIN:VEVENT\r\n";
+    v+="UID:kkk58-bd-"+r.id+"@"+icsHost()+"\r\n";
+    v+="DTSTAMP:"+icsStampNow()+"\r\n";
+    v+="DTSTART;VALUE=DATE:"+icsDate(r.geburtsdatum)+"\r\n";
+    v+="DTEND;VALUE=DATE:"+icsAddDay(r.geburtsdatum)+"\r\n";
+    v+="SUMMARY:"+icsEsc("🎂 "+r.name)+"\r\n";
+    v+="RRULE:FREQ=YEARLY\r\n";
+    return v+"END:VEVENT\r\n";
+  }
+  // Zeilen auf 73 Zeichen falten (RFC 5545), fortgesetzte Zeilen mit führendem Leerzeichen
+  function icsFold(s){ return s.split("\r\n").map(line=>{ if(line.length<=73)return line; let out="",rest=line; while(rest.length>73){ out+=rest.slice(0,73)+"\r\n "; rest=rest.slice(73);} return out+rest; }).join("\r\n"); }
+  function icsWrap(body){ return icsFold("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//KKk58//Kalender//DE\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n"+body+"END:VCALENDAR\r\n"); }
+  function downloadEventIcal(id){ const ev=events.find(x=>x.id===id); if(!ev){toast("Termin nicht gefunden.");return;}
+    dlBlob(icsWrap(icsVevent(ev)),"text/calendar;charset=utf-8","KKk58-Termin-"+ev.date+".ics"); toast("iCal erstellt."); }
+  function downloadAllIcal(){ let body="";
+    events.slice().sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0).forEach(ev=>{body+=icsVevent(ev);});
+    if(calShowBd()) roster.filter(r=>r.active!==false && r.geburtsdatum).forEach(r=>{body+=icsBirthdayVevent(r);});
+    if(!body){toast("Keine Termine.");return;}
+    dlBlob(icsWrap(body),"text/calendar;charset=utf-8","KKk58-Kalender-"+new Date().toISOString().slice(0,10)+".ics"); toast("iCal erstellt."); }
+  $("cal_ical_all").addEventListener("click",downloadAllIcal);
 
   // ---------- Abstimmungen (Ja/Nein) ----------
   function pollDate(ms){ const d=new Date(ms); const z=n=>String(n).padStart(2,"0"); return z(d.getDate())+"."+z(d.getMonth()+1)+"."+d.getFullYear(); }

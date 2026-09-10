@@ -50,7 +50,7 @@ function emptySheet() {
   return { event: '', date: '', lanes: { bohle: true, schere: false }, priceNK: 1, pricePump: 0.1,
     pumpen: '', note: '', seq: 0, players: [], updatedBy: '', updatedAt: 0 };
 }
-let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, develop: [], seqDevelop: 0, polls: [], seqPolls: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
+let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, develop: [], seqDevelop: 0, events: [], seqEvents: 0, polls: [], seqPolls: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
 const LOG_MAX = 400;
 
 function cint(v, mn, mx, fb) { let n = Math.round(Number(v)); if (!isFinite(n)) return fb; return Math.min(mx, Math.max(mn, n)); }
@@ -202,6 +202,26 @@ function seedDevelop() {
   ];
   db.develop = data.map(([date, description, count]) => normDevelop({ id: ++db.seqDevelop, date, description, count }));
 }
+// ---------- Termine / Kalender ----------
+// Ein Termin: Datum (JJJJ-MM-TT, Pflicht), Beschreibung (Freitext), Wiederholung
+// (none/weekly/monthly/yearly) und – nur bei Wiederholung – ein optionales Enddatum "until",
+// bis zu dem der Termin wiederkehrt (leer = ohne Ende). Die Geburtstage werden NICHT hier
+// gespeichert, sondern im Frontend aus dem Mitgliedsverzeichnis (geburtsdatum) abgeleitet.
+const EVENT_TEXT_MAX = 200;
+const EVENT_PLACE_MAX = 120;
+const EVENT_REPEATS = ['none', 'weekly', 'biweekly', 'monthly', 'yearly'];
+function normEventRepeat(v) { return EVENT_REPEATS.indexOf(v) !== -1 ? v : 'none'; }
+function normEvent(src) {
+  const repeat = normEventRepeat(src && src.repeat);
+  return {
+    id: (src && src.id != null) ? Number(src.id) : null,
+    date: normDate(src && src.date),
+    text: String((src && src.text) || '').trim().slice(0, EVENT_TEXT_MAX),
+    place: String((src && src.place) || '').trim().slice(0, EVENT_PLACE_MAX),
+    repeat,
+    until: repeat === 'none' ? null : normDate(src && src.until)
+  };
+}
 function loadDb() {
   try {
     const j = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
@@ -232,6 +252,8 @@ function loadDb() {
     db.seqDevelop = j.seqDevelop || db.develop.reduce((m, d) => Math.max(m, d.id), 0);
     // Migration älterer Datenbanken ohne Chronik: Mitgliederentwicklung als Startdatensatz anlegen
     if (!Object.prototype.hasOwnProperty.call(j, 'develop')) seedDevelop();
+    db.events = Array.isArray(j.events) ? j.events.map(normEvent).filter(e => e.id != null && e.date && e.text) : [];
+    db.seqEvents = j.seqEvents || db.events.reduce((m, e) => Math.max(m, e.id), 0);
     db.polls = Array.isArray(j.polls) ? j.polls.map(normPoll).filter(Boolean) : [];
     db.seqPolls = j.seqPolls || db.polls.reduce((m, p) => Math.max(m, p.id), 0);
     db.log = Array.isArray(j.log) ? j.log.slice(-LOG_MAX) : [];
@@ -456,6 +478,9 @@ function describeOp(op, ctx) {
     case 'addDevelop': return 'Chronik: Eintrag angelegt (' + (op.entry && op.entry.date ? op.entry.date : 'ohne Datum') + ')';
     case 'updateDevelop': return 'Chronik: Eintrag bearbeitet (' + (op.entry && op.entry.date ? op.entry.date : 'ohne Datum') + ')';
     case 'removeDevelop': return 'Chronik: Eintrag gelöscht';
+    case 'addEvent': return 'Termin angelegt: ' + (op.event ? (fmtD(op.event.date) + (op.event.text ? ' – ' + op.event.text : '')) : '');
+    case 'updateEvent': return 'Termin bearbeitet: ' + (op.event ? (fmtD(op.event.date) + (op.event.text ? ' – ' + op.event.text : '')) : '');
+    case 'removeEvent': return 'Termin gelöscht';
     case 'addPoll': return 'Abstimmung erstellt: ' + (op.poll ? op.poll.question : '');
     case 'votePoll': return 'Abgestimmt: ' + (op.poll ? op.poll.question : '') + ' (' + (op.choice === 'yes' ? 'Ja' : 'Nein') + ')';
     case 'closePoll': return 'Abstimmung beendet: ' + (op.poll ? op.poll.question : '');
@@ -928,6 +953,27 @@ function applyOp(op, user) {
       if (db.develop.length === b) return null;
       return { type: 'removeDevelop', id: Number(op.id) };
     }
+    // ----- Termine / Kalender (Anlegen/Bearbeiten/Löschen nur mit Verwaltungsrecht;
+    // „beschränkt" hat ausschließlich lesenden Zugriff) -----
+    case 'addEvent': {
+      if (!canManage(user.role)) return null;
+      const e = normEvent(op.event || {}); if (!e.date || !e.text) return null;
+      e.id = ++db.seqEvents; db.events.push(e);
+      return { type: 'addEvent', event: e };
+    }
+    case 'updateEvent': {
+      if (!canManage(user.role)) return null;
+      const cur = db.events.find(x => x.id === Number(op.id)); if (!cur) return null;
+      const e = normEvent(Object.assign({}, op.event, { id: cur.id })); if (!e.date || !e.text) return null;
+      cur.date = e.date; cur.text = e.text; cur.place = e.place; cur.repeat = e.repeat; cur.until = e.until;
+      return { type: 'updateEvent', id: cur.id, event: cur };
+    }
+    case 'removeEvent': {
+      if (!canManage(user.role)) return null;
+      const b = db.events.length; db.events = db.events.filter(x => x.id !== Number(op.id));
+      if (db.events.length === b) return null;
+      return { type: 'removeEvent', id: Number(op.id) };
+    }
     // ----- Abstimmungen -----
     // Erstellen und Abstimmen darf jedes angemeldete Konto; frühzeitig beenden/löschen
     // nur der Ersteller oder ein Konto mit Verwaltungsrecht.
@@ -1147,7 +1193,7 @@ function handle(req, res) {
     catch (e) { return send(res, 400, { error: 'Daten zu lang für QR' }); }
   }
   if (api === '/logout' && req.method === 'POST') { clearSessionCookie(res); return send(res, 200, { ok: true }); }
-  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, develop: db.develop, polls: db.polls.map(pollView), me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
+  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView), me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
   if (api === '/roster' && req.method === 'GET') return send(res, 200, { roster: db.roster });
   if (api === '/archive' && req.method === 'GET') return send(res, 200, { archive: db.archive.map(archiveMeta).sort((a, b) => b.savedAt - a.savedAt) });
   if (api === '/export' && req.method === 'GET') {
@@ -1173,7 +1219,7 @@ function handle(req, res) {
   if (api === '/events' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.write('retry: 3000\n\n');
-    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, develop: db.develop, polls: db.polls.map(pollView) }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView) }) + '\n\n');
     const c = { res, uid: me.id }; clients.add(c); req.on('close', () => clients.delete(c)); return;
   }
 
