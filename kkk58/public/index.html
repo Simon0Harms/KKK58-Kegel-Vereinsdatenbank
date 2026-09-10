@@ -256,8 +256,8 @@
   <div class="login">
     <div class="eyebrow">Vereinsdatenbank</div>
     <h1>KKk58</h1>
-    <label for="l_user">Benutzername</label>
-    <input id="l_user" type="text" autocomplete="username" autocapitalize="off">
+    <label for="l_user">Benutzername, Telefon, E-Mail oder Matrix-ID</label>
+    <input id="l_user" type="text" autocomplete="username" autocapitalize="off" placeholder="Benutzername oder hinterlegte Telefon/E-Mail/MXID">
     <label for="l_pass">Passwort</label>
     <input id="l_pass" type="password" autocomplete="current-password">
     <button id="l_btn" type="button">Anmelden</button>
@@ -265,7 +265,7 @@
     <div class="mxlogin">
       <a href="#" id="l_matrix_toggle">Kein Passwort? Login-Link per Matrix anfordern</a>
       <div id="l_matrix_box" class="hidden">
-        <label for="l_mx_user">Benutzername oder Matrix-ID</label>
+        <label for="l_mx_user">Benutzername, Telefon, E-Mail oder Matrix-ID</label>
         <input id="l_mx_user" type="text" autocomplete="username" autocapitalize="off" placeholder="max  oder  @max:matrix.example.org">
         <button id="l_mx_send" type="button">Login-Link senden</button>
         <div id="l_mx_msg" class="mxmsg"></div>
@@ -298,6 +298,12 @@
     <input id="pw_new2" type="password" autocomplete="new-password">
     <button id="pw_btn" type="button" style="margin-top:12px">Passwort speichern</button>
     <div id="pw_err" class="err"></div>
+    <p style="color:var(--muted);font-size:.82rem;margin:14px 0 0;border-top:1px solid var(--line);padding-top:12px;line-height:1.5">
+      <b>Tipp:</b> Wenn du im Reiter <b>Verzeichnis</b> deine Kontaktdaten pflegst
+      (Telefon privat/dienstlich, Handy, E-Mail privat/dienstlich oder Matrix-ID),
+      kannst du dich künftig auch mit einem dieser Werte statt deines Benutzernamens anmelden –
+      das Passwort bleibt dabei gleich.
+    </p>
   </div>
 </div>
 

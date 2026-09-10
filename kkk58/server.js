@@ -137,11 +137,50 @@ function findInvite(token) { const t = String(token || ''); return db.invites.fi
 function validRoom(s) { s = String(s || '').trim(); return s.length >= 3 && s.length <= 255 && /^[!#][^\s:]+:[^\s:]+$/.test(s) ? s : null; }
 // Matrix-Benutzer-ID (@name:server); optional, dient nur als Nachschlage-Schlüssel beim Login.
 function validMxid(s) { s = String(s || '').trim(); return s.length >= 3 && s.length <= 255 && /^@[^\s:]+:[^\s:]+$/.test(s) ? s : null; }
-// Konto anhand der Eingabe finden: MXID (@name:server) -> über verknüpfte, verifizierte MXID; sonst Benutzername.
+// Kontaktfelder aus dem Mitgliedsverzeichnis, über die man sich zusätzlich anmelden kann.
+// (Adresse/Geburtsdatum bewusst NICHT, da nicht eindeutig genug.)
+const LOGIN_CONTACT_KEYS = ['telefonPrivat', 'telefonDienst', 'handy', 'emailPrivat', 'emailDienst', 'mxid'];
+function isPhoneKey(k) { return k === 'telefonPrivat' || k === 'telefonDienst' || k === 'handy'; }
+// Telefon nur nach Ziffern vergleichen (Leerzeichen, /, -, (), + werden ignoriert).
+// Annahme/Grenze: 0049… und +49… gelten damit NICHT automatisch als dieselbe Nummer.
+function normPhone(s) { return String(s || '').replace(/\D+/g, ''); }
+// Alle Konten, deren zugeordnete Stamm-Person einen zur Eingabe passenden Kontaktwert trägt.
+function usersByContact(login) {
+  const raw = String(login || '').trim(); if (!raw) return [];
+  const low = raw.toLowerCase();
+  const phone = normPhone(raw);
+  const out = [];
+  for (const u of db.users) {
+    if (u.rosterId == null) continue;
+    const r = db.roster.find(x => x.id === u.rosterId);
+    if (!r) continue;
+    let match = false;
+    for (const k of LOGIN_CONTACT_KEYS) {
+      const val = r[k];
+      if (!val) continue; // leere Verzeichnisfelder nie als Treffer werten
+      if (isPhoneKey(k)) { if (phone && normPhone(val) === phone) { match = true; break; } }
+      else if (String(val).trim().toLowerCase() === low) { match = true; break; }
+    }
+    if (match) out.push(u);
+  }
+  return out;
+}
+// Konto anhand der Eingabe finden. Reihenfolge:
+//  1) exakter Benutzername (Vorrang, damit bestehendes Verhalten stabil bleibt)
+//  2) verifizierte Matrix-ID (@name:server) aus der Matrix-Verknüpfung
+//  3) Kontaktfeld aus dem Mitgliedsverzeichnis – NUR bei eindeutigem Treffer
+//     (0 oder >1 Treffer => null, damit man nie im falschen Konto landet)
 function findUserByLogin(login) {
   const s = String(login || '').trim(); if (!s) return null;
-  if (s[0] === '@') { const l = s.toLowerCase(); return db.users.find(u => u.matrix && u.matrix.verified && u.matrix.mxid && u.matrix.mxid.toLowerCase() === l) || null; }
-  return db.users.find(u => u.username.toLowerCase() === s.toLowerCase()) || null;
+  const byName = db.users.find(u => u.username.toLowerCase() === s.toLowerCase());
+  if (byName) return byName;
+  if (s[0] === '@') {
+    const l = s.toLowerCase();
+    const mx = db.users.find(u => u.matrix && u.matrix.verified && u.matrix.mxid && u.matrix.mxid.toLowerCase() === l);
+    if (mx) return mx;
+  }
+  const c = usersByContact(s);
+  return c.length === 1 ? c[0] : null;
 }
 // Prüft, ob eine MXID bereits einem anderen Konto zugeordnet ist.
 function mxidTakenBy(mxid, exceptUserId) { const l = String(mxid).toLowerCase(); return db.users.find(u => u.id !== exceptUserId && u.matrix && u.matrix.mxid && u.matrix.mxid.toLowerCase() === l) || null; }
@@ -706,7 +745,10 @@ function handle(req, res) {
     if (throttled(ip)) return send(res, 429, { error: 'zu viele Versuche, bitte später erneut' });
     return readJson(req, body => {
       if (!body) return send(res, 400, { error: 'bad request' });
-      const user = db.users.find(x => x.username.toLowerCase() === String(body.username || '').toLowerCase());
+      // "login" akzeptiert Benutzername, Matrix-ID oder ein Verzeichnis-Kontaktfeld
+      // (Telefon/Handy/E-Mail/MXID); "username" bleibt aus Kompatibilität erhalten.
+      const login = String((body.login != null ? body.login : body.username) || '').trim();
+      const user = findUserByLogin(login);
       if (!user || !verifyPw(user, body.password || '')) { badLogin(ip); return send(res, 401, { error: 'Login fehlgeschlagen' }); }
       attempts.delete(ip); setSessionCookie(res, user.id);
       send(res, 200, { user: { id: user.id, username: user.username, role: user.role }, mustChangePassword: !!user.mustChangePassword });
