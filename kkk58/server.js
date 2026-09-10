@@ -45,7 +45,7 @@ function emptySheet() {
   return { event: '', date: '', lanes: { bohle: true, schere: false }, priceNK: 1, pricePump: 0.1,
     pumpen: '', note: '', seq: 0, players: [], updatedBy: '', updatedAt: 0 };
 }
-let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
+let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
 const LOG_MAX = 400;
 
 function cint(v, mn, mx, fb) { let n = Math.round(Number(v)); if (!isFinite(n)) return fb; return Math.min(mx, Math.max(mn, n)); }
@@ -97,6 +97,80 @@ function seedPrizes() {
     evaluation: 'Den Anspruch auf den Preis muss der Kegler selbst anmelden! Die Schriftwarte sind in diesem Falle für die Beobachtung der Anzeige nicht verantwortlich. Sie notieren allerdings die Anzahl der Siebenen sowie den Durchgang und das Datum.\n\nErheben an einem Abend mehrere Kegelbrüder den Anspruch auf den Preis, so ist derjenige mit den meisten hintereinander angezeigten Siebenen der Gewinner.\n\nAls Wanderpreis ist eine Plakette ausgelobt, auf welcher derjenige Kegelbruder seinen Namen, die Anzahl der Siebenen und das Datum eingravieren lassen darf, der als erster im Kalenderjahr die höchste Anzahl von „777…" angemeldet hat (Mit gilt nicht!). Der Preis wird jeweils am ersten Kegelabend im neuen Jahr vergeben. Die Plakette verbleibt jeweils solange im Besitz des Gewinners, bis im Folgejahr ein weiterer Name eingraviert wird.'
   }];
 }
+// ---------- Kegelausflüge ----------
+// Ein Ausflug je Jahr: Jahr (Pflicht), Ort, Beschreibung (optional, mehrzeilig), Zeitraum (Freitext).
+// Sortierung erfolgt im Frontend nach Jahr; hier nur Normalisierung/Validierung.
+const TRIP_DESC_MAX = 2000;
+function normTripYear(v) { const n = Math.round(Number(v)); return isFinite(n) && n >= 1900 && n <= 2200 ? n : null; }
+function normTrip(src) {
+  return {
+    id: (src && src.id != null) ? Number(src.id) : null,
+    year: normTripYear(src && src.year),
+    place: String((src && src.place) || '').trim().slice(0, 120),
+    description: String(src && src.description == null ? '' : src.description).replace(/\r\n/g, '\n').replace(/\r/g, '\n').slice(0, TRIP_DESC_MAX),
+    period: String((src && src.period) || '').trim().slice(0, 120)
+  };
+}
+// Startdatensatz für frische bzw. auf Ausflüge migrierte Datenbanken.
+// Übernommen aus „KKK 58 – Zusammenstellung der Kegelausflüge" (Stand September 2019),
+// offensichtliche Tippfehler in den Jahreszahlen der Zeitraum-Spalte korrigiert.
+function seedTrips() {
+  const data = [
+    [1968, 'Helgoland', '1. Ausflug zum 10-jährigen Bestehen des Klubs', '21.–22.09.1968'],
+    [1969, '', 'kein Ausflug', ''],
+    [1970, 'Bodenwerder', 'Weser', '06.–07.09.1970'],
+    [1971, '', 'KK-Schießen (statt Ausflug)', ''],
+    [1972, 'Hermannsburg', '', '17.–19.09.1972'],
+    [1973, 'Helgoland', '', '15.–16.09.1973'],
+    [1974, 'Marienhagen', '', '06.–08.09.1974'],
+    [1975, 'Hermannsburg', '', ''],
+    [1976, 'Marienhagen', '', ''],
+    [1977, 'Karlshafen', 'Weser', ''],
+    [1978, 'Gellenhausen', 'Barbarossastadt; Hessen / mit KK-Schießen', ''],
+    [1979, 'Rothenburg o. d. Tauber', '', ''],
+    [1980, 'Hann. Münden – Laubach', 'Hotel Werrastrand', '12.–14.09.1980'],
+    [1981, 'Einbeck', 'Hotel Hasenjäger', '22.–24.05.1981'],
+    [1982, '', 'nur Schießen in Vechelde', '07.05. und 17.09.1982'],
+    [1983, 'Borkum', 'Hotel Jägerheim; zum 25-jährigen Bestehen', '02.–05.09.1983'],
+    [1984, 'Borkum', 'Hotel Jägerheim', '31.08.–02.09.1984'],
+    [1985, 'Groß Hehlen', 'Weserbergland, Haus Siever', '20.–22.09.1985'],
+    [1986, 'Wingst-Höftgrube', 'Hotel Peter', '26.–28.09.1986'],
+    [1987, 'Laßbruch', 'Extertal, Hotel Meier', '25.–27.09.1987'],
+    [1988, 'Büdingen', 'Hessen; Hotel Stadt Büdingen', '02.–06.09.1988'],
+    [1989, 'Laßbruch', 'Extertal; Hotel Meier', '06.–08.10.1989'],
+    [1990, 'Nienburg-Holtorf', 'Hotel Holtorfer Hof', '12.–14.10.1990'],
+    [1991, 'Steyerberg', 'Lk. Nienburg; Waldhotel Süllhof', '11.–13.10.1991'],
+    [1992, 'Tübingen', 'Hotel am Bad', '11.–13.09.1992'],
+    [1993, 'Schwerin', 'Hotel Fritz Reutter', '17.–19.09.1993'],
+    [1994, 'Freital', 'bei Dresden; Berghotel', '09.–11.09.1994'],
+    [1995, 'Osnabrück', 'Parkhotel', '08.–10.09.1995'],
+    [1996, 'Bücken', 'Weser, Grafschaft Hoya; Hotel zur Linde', '27.–29.09.1996'],
+    [1997, 'Stavenhagen', 'Reuterstadt; Hotel Kutzbach', '03.–05.10.1997'],
+    [1998, 'Würzburg', 'Schlosshotel Steinburg', '23.–25.10.1998'],
+    [1999, 'Wernigerode-Silstedt', 'Hotel Blocksberg', '05.–07.11.1999'],
+    [2000, 'Dielmissen', 'Weser, Am Ith; Gasthaus Angerkrug', '29.09.–01.10.2000'],
+    [2001, 'Stralsund', 'Hotel An den Bleichen', '28.–30.09.2001'],
+    [2002, 'Cottbus', 'Hotel Cottbusser Hof', '27.–29.09.2002'],
+    [2003, 'Goslar', 'Hotel zur Börse', '26.–28.09.2003'],
+    [2004, 'Magdeburg', 'Hotel Stadtfeld; Besuch der Bundesgartenschau', '01.–03.10.2004'],
+    [2005, 'St. Andreasberg', 'Hotel Rehberg', '26.–27.11.2005'],
+    [2006, 'Quedlinburg', 'Hotel Domschatz', '20.–22.10.2006'],
+    [2007, 'Lüneburg-Mehlbeck', 'Comfort-Hotel', '21.–23.09.2007'],
+    [2008, 'Kiel – Oslo – Kiel', 'Fährschiff Color Fantasy; anlässlich des 50-jährigen Bestehens des KKK58', '27.–29.08.2008'],
+    [2009, 'Bremerhaven', 'Hotel Adena / Besuch des Alfred-Wegener-Instituts', '23.–25.10.2009'],
+    [2010, 'Rostock', 'Hotel Citymaxx', '28.–30.08.2010'],
+    [2011, 'Seligenstadt', 'Hotel Zum Ritter / Besuch des Senders Mainflingen', '14.–16.10.2011'],
+    [2012, 'Paderborn – Elsen', 'Hotel Kaiserpfalz / Besuch des Nixdorf-Museums', '19.–21.10.2012'],
+    [2013, 'Papenburg', 'Hotel Atlantis / Besuch der Meyerwerft', '18.–20.10.2013'],
+    [2014, 'Wangerland', '', '17.–19.10.2014'],
+    [2015, 'Potsdam', 'Kongresshotel Potsdam / Besuch des Hohenzollernschlosses „Sanssouci"', '02.–04.10.2015'],
+    [2016, 'Wismar', 'Hotel Alter Speicher', '30.09.–02.10.2016'],
+    [2017, 'Heidelberg', 'Hotel Perkeo', '27.–29.10.2017'],
+    [2018, 'Emden', 'Parkhotel Upstalsboom', '07.–09.12.2018'],
+    [2019, 'Göttingen', 'Leine Hotel', '06.–08.09.2019']
+  ];
+  db.trips = data.map(([year, place, description, period]) => normTrip({ id: ++db.seqTrips, year, place, description, period }));
+}
 function loadDb() {
   try {
     const j = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
@@ -119,6 +193,10 @@ function loadDb() {
     db.seqPrizes = j.seqPrizes || db.prizes.reduce((m, p) => Math.max(m, p.id), 0);
     // Migration älterer Datenbanken ohne Preise: W-Weber-Preis als Startdatensatz anlegen
     if (!Object.prototype.hasOwnProperty.call(j, 'prizes')) seedPrizes();
+    db.trips = Array.isArray(j.trips) ? j.trips.map(normTrip).filter(t => t.id != null && t.year != null) : [];
+    db.seqTrips = j.seqTrips || db.trips.reduce((m, t) => Math.max(m, t.id), 0);
+    // Migration älterer Datenbanken ohne Ausflüge: historische Liste als Startdatensatz anlegen
+    if (!Object.prototype.hasOwnProperty.call(j, 'trips')) seedTrips();
     db.log = Array.isArray(j.log) ? j.log.slice(-LOG_MAX) : [];
     const nowL = Date.now();
     db.invites = Array.isArray(j.invites) ? j.invites.filter(x => x && !x.used && x.expires > nowL) : [];
@@ -128,7 +206,7 @@ function loadDb() {
     const cs = j.cashSettings || {};
     db.cashSettings = { duesCent: Number.isFinite(cs.duesCent) ? cs.duesCent : 2000, absenceCent: Number.isFinite(cs.absenceCent) ? cs.absenceCent : 100, expenseCent: Number.isFinite(cs.expenseCent) ? cs.expenseCent : 3500, duesStartMonth: /^\d{4}-\d{2}$/.test(cs.duesStartMonth) ? cs.duesStartMonth : null };
     db.version = j.version || 0;
-  } catch (_) { /* Erststart */ seedPrizes(); }
+  } catch (_) { /* Erststart */ seedPrizes(); seedTrips(); }
 }
 let saveTimer = null;
 function saveDb() { clearTimeout(saveTimer); saveTimer = setTimeout(flushDb, 250); }
@@ -276,6 +354,9 @@ function describeOp(op, ctx) {
     case 'addPrize': return 'Preis angelegt: ' + (op.prize ? op.prize.title : '');
     case 'updatePrize': return 'Preis bearbeitet: ' + (op.prize ? op.prize.title : '');
     case 'removePrize': return 'Preis gelöscht';
+    case 'addTrip': return 'Ausflug angelegt: ' + (op.trip ? (op.trip.year + ' ' + (op.trip.place || '')).trim() : '');
+    case 'updateTrip': return 'Ausflug bearbeitet: ' + (op.trip ? (op.trip.year + ' ' + (op.trip.place || '')).trim() : '');
+    case 'removeTrip': return 'Ausflug gelöscht';
     default: return op.type;
   }
 }
@@ -704,6 +785,26 @@ function applyOp(op, user) {
       if (db.prizes.length === b) return null;
       return { type: 'removePrize', id: Number(op.id) };
     }
+    // ----- Kegelausflüge (Anlegen/Bearbeiten/Löschen nur mit Verwaltungsrecht) -----
+    case 'addTrip': {
+      if (!canManage(user.role)) return null;
+      const t = normTrip(op.trip || {}); if (t.year == null) return null;
+      t.id = ++db.seqTrips; db.trips.push(t);
+      return { type: 'addTrip', trip: t };
+    }
+    case 'updateTrip': {
+      if (!canManage(user.role)) return null;
+      const cur = db.trips.find(x => x.id === Number(op.id)); if (!cur) return null;
+      const t = normTrip(Object.assign({}, op.trip, { id: cur.id })); if (t.year == null) return null;
+      cur.year = t.year; cur.place = t.place; cur.description = t.description; cur.period = t.period;
+      return { type: 'updateTrip', id: cur.id, trip: cur };
+    }
+    case 'removeTrip': {
+      if (!canManage(user.role)) return null;
+      const b = db.trips.length; db.trips = db.trips.filter(x => x.id !== Number(op.id));
+      if (db.trips.length === b) return null;
+      return { type: 'removeTrip', id: Number(op.id) };
+    }
     default: return null;
   }
 }
@@ -889,7 +990,7 @@ function handle(req, res) {
     catch (e) { return send(res, 400, { error: 'Daten zu lang für QR' }); }
   }
   if (api === '/logout' && req.method === 'POST') { clearSessionCookie(res); return send(res, 200, { ok: true }); }
-  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
+  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
   if (api === '/roster' && req.method === 'GET') return send(res, 200, { roster: db.roster });
   if (api === '/archive' && req.method === 'GET') return send(res, 200, { archive: db.archive.map(archiveMeta).sort((a, b) => b.savedAt - a.savedAt) });
   if (api === '/export' && req.method === 'GET') {
@@ -915,7 +1016,7 @@ function handle(req, res) {
   if (api === '/events' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.write('retry: 3000\n\n');
-    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips }) + '\n\n');
     const c = { res, uid: me.id }; clients.add(c); req.on('close', () => clients.delete(c)); return;
   }
 

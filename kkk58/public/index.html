@@ -254,6 +254,15 @@
   .prizesec .ptext{white-space:pre-wrap;line-height:1.5}
   .prizeadmin{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
   .prizeempty{color:var(--muted);padding:18px 4px;text-align:center}
+  .triptable{width:100%;border-collapse:collapse}
+  .triptable th,.triptable td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);font-size:.9rem;vertical-align:top}
+  .triptable th{background:var(--card);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);position:sticky;top:0}
+  .triptable td.tyear{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .triptable td.tplace{font-weight:700;min-width:120px}
+  .triptable td.tdesc{white-space:pre-wrap;color:var(--muted)}
+  .triptable td.tperiod{white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}
+  .triptable td.tactions{white-space:nowrap;text-align:right}
+  .triptable tbody tr:hover{background:var(--card)}
   .dirgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:6px}
   .dirgrid .dirfull{grid-column:1 / -1}
   .dirgrid .fld label{display:block;font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 4px}
@@ -378,6 +387,7 @@
       <button id="nav_stats" type="button">Statistik</button>
       <button id="nav_dir" type="button">Verzeichnis</button>
       <button id="nav_prizes" type="button">Preise</button>
+      <button id="nav_trips" type="button">Ausflüge</button>
       <button id="nav_cash" type="button" class="hidden">Kasse</button>
       <div class="btnrow" id="sheetBtns">
         <button id="btn_focus" type="button" title="Nur die Liste anzeigen (Menü ausblenden)">⛶ Nur Liste</button>
@@ -510,6 +520,19 @@
     <div id="prizeList" class="prizelist"></div>
     <p class="foot" id="prizeFoot" style="text-align:left">Die Preisliste ist für alle angemeldeten Mitglieder sichtbar. Anlegen, Bearbeiten und Löschen nur mit Verwaltungsrecht (Admin, Kassenwart, Mitglied).</p>
   </section>
+
+  <!-- ===== AUSFLÜGE ===== -->
+  <section id="view_trips" class="hidden">
+    <div class="dirbar">
+      <span class="prizeintro">Zusammenstellung der Kegelausflüge, nach Jahr sortiert.</span>
+      <span style="flex:1"></span>
+      <label class="chip" id="trip_sort_lbl" title="Sortierrichtung nach Jahr umschalten"><input type="checkbox" id="trip_desc">Neueste zuerst</label>
+      <button class="btn ghost sm" id="trip_export" type="button" title="Ausflüge als CSV herunterladen">⬇ CSV</button>
+      <button class="btn prim sm hidden" id="trip_add" type="button">＋ Ausflug</button>
+    </div>
+    <div id="tripList"></div>
+    <p class="foot" id="tripFoot" style="text-align:left">Die Ausflugsliste ist für alle angemeldeten Mitglieder sichtbar. Anlegen, Bearbeiten und Löschen nur mit Verwaltungsrecht (Admin, Kassenwart, Mitglied).</p>
+  </section>
 </div>
 
 <!-- VERZEICHNIS: Bearbeiten-Dialog -->
@@ -549,6 +572,25 @@
     <div class="ddrow">
       <button class="btn prim" id="pz_save" type="button">Speichern</button>
       <button class="btn" id="pz_cancel" type="button">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
+<!-- AUSFLÜGE: Bearbeiten-Dialog -->
+<div id="tripdlg" class="ovl hidden">
+  <div class="login dirdlg">
+    <div class="eyebrow">Ausflüge</div>
+    <h1 id="tp_title">Ausflug bearbeiten</h1>
+    <div class="dirgrid">
+      <div class="fld"><label>Jahr</label><input id="tp_year" type="number" min="1900" max="2200" step="1" inputmode="numeric" placeholder="z. B. 2020"></div>
+      <div class="fld"><label>Zeitraum</label><input id="tp_period" type="text" placeholder="z. B. 06.–08.09.2019"></div>
+      <div class="fld dirfull"><label>Ort</label><input id="tp_place" type="text" placeholder="z. B. Göttingen" autocapitalize="words"></div>
+      <div class="fld dirfull"><label>Beschreibung (optional)</label><textarea id="tp_desc" rows="3" placeholder="Hotel, Anlass, Besichtigungen …"></textarea></div>
+    </div>
+    <div class="dderr err" id="tp_err"></div>
+    <div class="ddrow">
+      <button class="btn prim" id="tp_save" type="button">Speichern</button>
+      <button class="btn" id="tp_cancel" type="button">Abbrechen</button>
     </div>
   </div>
 </div>
@@ -598,7 +640,7 @@
   const canManage=r=>r==="admin"||r==="kassenwart"||r==="mitglied";
   const canCash=r=>r==="admin"||r==="kassenwart";
   const roleLabel=r=>ROLE_LABEL[r]||r;
-  let me=null, state=null, roster=[], prizes=[], version=0, es=null, currentView="sheet", sortMode="arrival";
+  let me=null, state=null, roster=[], prizes=[], trips=[], version=0, es=null, currentView="sheet", sortMode="arrival";
   const pending=new Set();
   const rid=()=> (crypto.randomUUID? crypto.randomUUID() : String(Date.now())+Math.random());
   const $=id=>document.getElementById(id);
@@ -642,7 +684,7 @@
     $("adminPanel").hidden=!manage; $("nav_cash").classList.remove("hidden");
     const seg=$("rvSeg"); if(seg) seg.querySelectorAll("button").forEach(b=>b.classList.toggle("active", b.dataset.vr===eff));
     $("rvNote").textContent = viewRole ? "Nur Vorschau – deine echten Rechte bleiben Admin." : "";
-    renderRosterAdmin(); renderDirectory(); renderPrizes(); if(currentView==="archive") loadArchive(); if(currentView==="cash"&&cashData) renderCash(); }
+    renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); if(currentView==="archive") loadArchive(); if(currentView==="cash"&&cashData) renderCash(); }
   function setViewRole(r){ if(!(me&&me.role==='admin'))return; viewRole = (r==='admin'||r===me.role) ? null : r; applyRoleUI(); }
   function showApp(){ $("view_invite").classList.add("hidden"); $("view_login").classList.add("hidden"); $("view_app").classList.remove("hidden");
     if(!(me&&me.role==='admin')) viewRole=null;
@@ -776,7 +818,7 @@
   $("pw_new2").addEventListener("keydown",e=>{if(e.key==='Enter')submitPw();});
 
   async function loadState(){ const r=await api('/state');
-    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; prizes=r.data.prizes||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); loadLog();
+    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; prizes=r.data.prizes||[]; trips=r.data.trips||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); loadLog();
       if(me&&me.mustChangePassword&&$("pwdlg").classList.contains("hidden")) openPwDialog(); }
     else if(r.status===401) showLogin(); }
   function resync(){ loadState(); }
@@ -790,6 +832,7 @@
     $("view_cash").classList.toggle("hidden",v!=="cash");
     $("view_directory").classList.toggle("hidden",v!=="dir");
     $("view_prizes").classList.toggle("hidden",v!=="prizes");
+    $("view_trips").classList.toggle("hidden",v!=="trips");
     $("sheetBtns").style.display = v==="sheet" ? "" : "none";
     $("nav_sheet").classList.toggle("active",v==="sheet");
     $("nav_archive").classList.toggle("active",v==="archive");
@@ -797,11 +840,13 @@
     $("nav_cash").classList.toggle("active",v==="cash");
     $("nav_dir").classList.toggle("active",v==="dir");
     $("nav_prizes").classList.toggle("active",v==="prizes");
+    $("nav_trips").classList.toggle("active",v==="trips");
     if(v==="archive") loadArchive();
     if(v==="stats") loadStats();
     if(v==="cash") loadCash();
     if(v==="dir") renderDirectory();
     if(v==="prizes") renderPrizes();
+    if(v==="trips") renderTrips();
   }
   // Fokus-Modus: nur die Liste zum Eintragen (Menü/Kopf ausgeblendet)
   function updateFocusMeta(){ const ev=($("f_event").value||"").trim(), dt=$("f_date").value||""; $("fbMeta").textContent=[ev,dt].filter(Boolean).join(" · "); }
@@ -812,6 +857,7 @@
   $("nav_cash").addEventListener("click",()=>setView("cash"));
   $("nav_dir").addEventListener("click",()=>setView("dir"));
   $("nav_prizes").addEventListener("click",()=>setView("prizes"));
+  $("nav_trips").addEventListener("click",()=>setView("trips"));
   $("rvSeg").addEventListener("click",e=>{ const b=e.target.closest("button[data-vr]"); if(b)setViewRole(b.dataset.vr); });
   $("btn_focus").addEventListener("click",()=>setFocus(true));
   $("fb_exit").addEventListener("click",()=>setFocus(false));
@@ -822,7 +868,7 @@
     es.onopen=()=>$("conn").classList.remove("off");
     es.onerror=()=>$("conn").classList.add("off");
     es.onmessage=ev=>{ let m; try{m=JSON.parse(ev.data);}catch(_){return;}
-      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; prizes=m.prizes||prizes; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); loadLog(); return; }
+      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; prizes=m.prizes||prizes; trips=m.trips||trips; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); loadLog(); return; }
       applyRemote(m); }; }
   function applyRemote(m){
     if(typeof m.v!=='number')return;
@@ -860,6 +906,9 @@
       case 'addPrize': if(op.prize && !prizes.some(p=>p.id===op.prize.id)) prizes.push(op.prize); renderPrizes(); return;
       case 'updatePrize': { const i=prizes.findIndex(p=>p.id===op.id); if(i>=0 && op.prize) prizes[i]=op.prize; renderPrizes(); return; }
       case 'removePrize': prizes=prizes.filter(p=>p.id!==op.id); renderPrizes(); return;
+      case 'addTrip': if(op.trip && !trips.some(t=>t.id===op.trip.id)) trips.push(op.trip); renderTrips(); return;
+      case 'updateTrip': { const i=trips.findIndex(t=>t.id===op.id); if(i>=0 && op.trip) trips[i]=op.trip; renderTrips(); return; }
+      case 'removeTrip': trips=trips.filter(t=>t.id!==op.id); renderTrips(); return;
     }
     updateDerived();
   }
@@ -1152,6 +1201,52 @@
   $("pz_save").addEventListener("click",savePrizeEdit);
   $("pz_cancel").addEventListener("click",closePrizeEdit);
   $("prizedlg").addEventListener("click",e=>{ if(e.target===$("prizedlg"))closePrizeEdit(); });
+
+  // ---------- Kegelausflüge (Jahresliste) ----------
+  let tripEditId=null;
+  function tripsSorted(){ const desc=$("trip_desc")&&$("trip_desc").checked;
+    return trips.slice().sort((a,b)=> desc ? ((b.year-a.year)||(b.id-a.id)) : ((a.year-b.year)||(a.id-b.id))); }
+  function renderTrips(){ const box=$("tripList"); if(!box)return; const manage=!!(me&&effManage());
+    const addBtn=$("trip_add"); if(addBtn)addBtn.classList.toggle("hidden",!manage);
+    if(!trips.length){ box.innerHTML='<div class="prizeempty">Noch keine Ausflüge eingetragen.'+(manage?' Über „＋ Ausflug" den ersten anlegen.':'')+'</div>'; return; }
+    const rows=tripsSorted().map(t=>'<tr>'
+      +'<td class="tyear">'+esc(t.year)+'</td>'
+      +'<td class="tplace">'+esc(t.place||'')+'</td>'
+      +'<td class="tdesc">'+esc(t.description||'')+'</td>'
+      +'<td class="tperiod">'+esc(t.period||'')+'</td>'
+      +(manage?'<td class="tactions"><button class="btn sm" type="button" data-tedit="'+t.id+'">Bearbeiten</button> <button class="btn warn sm" type="button" data-tdel="'+t.id+'">Löschen</button></td>':'')
+      +'</tr>').join("");
+    box.innerHTML='<div class="tablewrap"><table class="triptable"><thead><tr><th>Jahr</th><th>Ort</th><th>Beschreibung</th><th>Zeitraum</th>'+(manage?'<th></th>':'')+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+    box.querySelectorAll('[data-tedit]').forEach(b=>b.addEventListener("click",e=>{ e.preventDefault(); openTripEdit(Number(b.dataset.tedit)); }));
+    box.querySelectorAll('[data-tdel]').forEach(b=>b.addEventListener("click",e=>{ e.preventDefault(); const t=trips.find(x=>x.id===Number(b.dataset.tdel));
+      if(confirm('Ausflug „'+(t?(t.year+' '+(t.place||'')).trim():'')+'" wirklich löschen?')) opStruct({type:'removeTrip',id:Number(b.dataset.tdel)}); }));
+  }
+  function openTripEdit(id){ if(!(me&&effManage()))return; const t=id!=null?trips.find(x=>x.id===id):null; tripEditId=id!=null?id:null;
+    $("tp_title").textContent=t?"Ausflug bearbeiten":"Neuer Ausflug"; $("tp_err").textContent="";
+    $("tp_year").value=t?t.year:""; $("tp_place").value=t?(t.place||""):""; $("tp_desc").value=t?(t.description||""):""; $("tp_period").value=t?(t.period||""):"";
+    $("tripdlg").classList.remove("hidden"); setTimeout(()=>$("tp_year").focus(),50);
+  }
+  function closeTripEdit(){ $("tripdlg").classList.add("hidden"); tripEditId=null; }
+  function saveTripEdit(){ if(!(me&&effManage())){closeTripEdit();return;}
+    $("tp_err").textContent="";
+    const year=cInt($("tp_year").value,1900,2200,NaN);
+    if(!isFinite(year)){ $("tp_err").textContent="Bitte ein gültiges Jahr (1900–2200) angeben."; return; }
+    const trip={ year, place:$("tp_place").value.trim(), description:$("tp_desc").value, period:$("tp_period").value.trim() };
+    if(tripEditId!=null) opStruct({type:'updateTrip',id:tripEditId,trip});
+    else opStruct({type:'addTrip',trip});
+    closeTripEdit(); toast("Gespeichert.");
+  }
+  $("trip_add").addEventListener("click",()=>openTripEdit(null));
+  $("trip_desc").addEventListener("change",renderTrips);
+  $("tp_save").addEventListener("click",saveTripEdit);
+  $("tp_cancel").addEventListener("click",closeTripEdit);
+  $("tripdlg").addEventListener("click",e=>{ if(e.target===$("tripdlg"))closeTripEdit(); });
+  $("trip_export").addEventListener("click",()=>{ if(!trips.length){toast("Keine Einträge.");return;}
+    const head=["Jahr","Ort","Beschreibung","Zeitraum"];
+    const csvCell=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+    const rows=tripsSorted().map(t=>[t.year,t.place,t.description,t.period].map(csvCell).join(';'));
+    const csv='﻿'+[head.map(csvCell).join(';')].concat(rows).join('\r\n');
+    dlBlob(csv,'text/csv;charset=utf-8','KKk58-Kegelausfluege-'+new Date().toISOString().slice(0,10)+'.csv'); toast('CSV erstellt.'); });
 
   // CSV-Export (aktuelle Filterung)
   function dirCurrentList(){ const ql=($("dir_search").value||"").trim().toLowerCase(); const showInactive=$("dir_inactive").checked;
