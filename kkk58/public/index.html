@@ -228,6 +228,25 @@
     .tablewrap{box-shadow:none;overflow:visible;border-color:#999} tbody tr{break-inside:avoid}
     input.score,.step input{border:none;font-weight:800}
   }
+
+  /* ===== Mitgliedsverzeichnis ===== */
+  .dirbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .dirbar #dir_search{flex:1 1 240px;min-width:0;border:1px solid var(--line-strong);border-radius:9px;padding:9px 11px;font-size:.95rem}
+  .dirtable th,.dirtable td{text-align:left;font-size:.86rem;max-width:200px;overflow:hidden;text-overflow:ellipsis}
+  .dirtable td.dircell-name{font-weight:700}
+  .dirtable a{color:var(--pine-dark);text-decoration:none} .dirtable a:hover{text-decoration:underline}
+  .dirtable td.dir-inactive,.dirtable tr.dir-inactive td{color:var(--muted)}
+  .dirtable .btn{white-space:nowrap}
+  .dir-empty{color:var(--muted);padding:14px 6px}
+  .dirdlg{max-width:640px}
+  .dirgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:6px}
+  .dirgrid .dirfull{grid-column:1 / -1}
+  .dirgrid .fld label{display:block;font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 4px}
+  .dirgrid .fld input{width:100%;border:1px solid var(--line-strong);border-radius:9px;padding:10px;font:inherit}
+  .dderr{min-height:1.2em;margin-top:8px}
+  .ddrow{display:flex;gap:8px;margin-top:14px}
+  .ddrow .btn{flex:1;padding:12px;border-radius:9px;font-weight:700;font-size:1rem;cursor:pointer}
+  @media(max-width:560px){ .dirgrid{grid-template-columns:1fr} }
 </style>
 </head>
 <body>
@@ -336,6 +355,7 @@
       <button id="nav_sheet" class="active" type="button">Anschreiben</button>
       <button id="nav_archive" type="button">Archiv</button>
       <button id="nav_stats" type="button">Statistik</button>
+      <button id="nav_dir" type="button">Verzeichnis</button>
       <button id="nav_cash" type="button" class="hidden">Kasse</button>
       <div class="btnrow" id="sheetBtns">
         <button id="btn_focus" type="button" title="Nur die Liste anzeigen (Menü ausblenden)">⛶ Nur Liste</button>
@@ -440,6 +460,47 @@
   <section id="view_cash" class="hidden">
     <div id="cashBody"></div>
   </section>
+
+  <!-- ===== MITGLIEDSVERZEICHNIS ===== -->
+  <section id="view_directory" class="hidden">
+    <div class="dirbar">
+      <input id="dir_search" type="text" placeholder="Suchen (Name, Telefon, E-Mail, Adresse …)" autocapitalize="none">
+      <label class="chip" id="dir_inactive_lbl"><input type="checkbox" id="dir_inactive">Inaktive zeigen</label>
+      <span style="flex:1"></span>
+      <button class="btn ghost sm" id="dir_export" type="button" title="Verzeichnis als CSV herunterladen">⬇ CSV</button>
+      <button class="btn ghost sm" id="dir_vcf" type="button" title="Als vCard (.vcf) für Kontakte-App">⬇ vCard</button>
+      <button class="btn prim sm hidden" id="dir_add" type="button">＋ Mitglied</button>
+    </div>
+    <div class="tablewrap"><table class="dirtable"><thead><tr>
+      <th>Name</th><th>Tel. privat</th><th>Tel. dienstl.</th><th>Handy</th>
+      <th>E-Mail privat</th><th>E-Mail dienstl.</th><th>Geburtstag</th><th>Adresse</th><th>MXID</th><th></th>
+    </tr></thead><tbody id="dirTable"></tbody></table></div>
+    <p class="foot" style="text-align:left">Kontaktdaten sind für alle angemeldeten Mitglieder sichtbar. Bearbeiten nur mit Verwaltungsrecht (Admin, Kassenwart, Mitglied).</p>
+  </section>
+</div>
+
+<!-- VERZEICHNIS: Bearbeiten-Dialog -->
+<div id="dirdlg" class="ovl hidden">
+  <div class="login dirdlg">
+    <div class="eyebrow">Mitgliedsverzeichnis</div>
+    <h1 id="dd_title">Mitglied bearbeiten</h1>
+    <div class="dirgrid">
+      <div class="fld"><label>Name</label><input id="dd_name" type="text" autocapitalize="words"></div>
+      <div class="fld"><label>Geburtsdatum</label><input id="dd_geburtsdatum" type="date"></div>
+      <div class="fld"><label>Telefon privat</label><input id="dd_telefonPrivat" type="tel"></div>
+      <div class="fld"><label>Telefon dienstlich</label><input id="dd_telefonDienst" type="tel"></div>
+      <div class="fld"><label>Handy</label><input id="dd_handy" type="tel"></div>
+      <div class="fld"><label>MXID (Matrix)</label><input id="dd_mxid" type="text" placeholder="@name:server" autocapitalize="none"></div>
+      <div class="fld"><label>E-Mail privat</label><input id="dd_emailPrivat" type="email" autocapitalize="none"></div>
+      <div class="fld"><label>E-Mail dienstlich</label><input id="dd_emailDienst" type="email" autocapitalize="none"></div>
+      <div class="fld dirfull"><label>Adresse</label><input id="dd_adresse" type="text" placeholder="Straße, PLZ Ort"></div>
+    </div>
+    <div class="dderr err" id="dd_err"></div>
+    <div class="ddrow">
+      <button class="btn prim" id="dd_save" type="button">Speichern</button>
+      <button class="btn" id="dd_cancel" type="button">Abbrechen</button>
+    </div>
+  </div>
 </div>
 
 <!-- KASSE: Buchungs-Dialog -->
@@ -531,7 +592,7 @@
     $("adminPanel").hidden=!manage; $("nav_cash").classList.remove("hidden");
     const seg=$("rvSeg"); if(seg) seg.querySelectorAll("button").forEach(b=>b.classList.toggle("active", b.dataset.vr===eff));
     $("rvNote").textContent = viewRole ? "Nur Vorschau – deine echten Rechte bleiben Admin." : "";
-    renderRosterAdmin(); if(currentView==="archive") loadArchive(); if(currentView==="cash"&&cashData) renderCash(); }
+    renderRosterAdmin(); renderDirectory(); if(currentView==="archive") loadArchive(); if(currentView==="cash"&&cashData) renderCash(); }
   function setViewRole(r){ if(!(me&&me.role==='admin'))return; viewRole = (r==='admin'||r===me.role) ? null : r; applyRoleUI(); }
   function showApp(){ $("view_invite").classList.add("hidden"); $("view_login").classList.add("hidden"); $("view_app").classList.remove("hidden");
     if(!(me&&me.role==='admin')) viewRole=null;
@@ -665,7 +726,7 @@
   $("pw_new2").addEventListener("keydown",e=>{if(e.key==='Enter')submitPw();});
 
   async function loadState(){ const r=await api('/state');
-    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); loadLog();
+    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); loadLog();
       if(me&&me.mustChangePassword&&$("pwdlg").classList.contains("hidden")) openPwDialog(); }
     else if(r.status===401) showLogin(); }
   function resync(){ loadState(); }
@@ -677,14 +738,17 @@
     $("view_archive").classList.toggle("hidden",v!=="archive");
     $("view_stats").classList.toggle("hidden",v!=="stats");
     $("view_cash").classList.toggle("hidden",v!=="cash");
+    $("view_directory").classList.toggle("hidden",v!=="dir");
     $("sheetBtns").style.display = v==="sheet" ? "" : "none";
     $("nav_sheet").classList.toggle("active",v==="sheet");
     $("nav_archive").classList.toggle("active",v==="archive");
     $("nav_stats").classList.toggle("active",v==="stats");
     $("nav_cash").classList.toggle("active",v==="cash");
+    $("nav_dir").classList.toggle("active",v==="dir");
     if(v==="archive") loadArchive();
     if(v==="stats") loadStats();
     if(v==="cash") loadCash();
+    if(v==="dir") renderDirectory();
   }
   // Fokus-Modus: nur die Liste zum Eintragen (Menü/Kopf ausgeblendet)
   function updateFocusMeta(){ const ev=($("f_event").value||"").trim(), dt=$("f_date").value||""; $("fbMeta").textContent=[ev,dt].filter(Boolean).join(" · "); }
@@ -693,6 +757,7 @@
   $("nav_archive").addEventListener("click",()=>setView("archive"));
   $("nav_stats").addEventListener("click",()=>setView("stats"));
   $("nav_cash").addEventListener("click",()=>setView("cash"));
+  $("nav_dir").addEventListener("click",()=>setView("dir"));
   $("rvSeg").addEventListener("click",e=>{ const b=e.target.closest("button[data-vr]"); if(b)setViewRole(b.dataset.vr); });
   $("btn_focus").addEventListener("click",()=>setFocus(true));
   $("fb_exit").addEventListener("click",()=>setFocus(false));
@@ -703,7 +768,7 @@
     es.onopen=()=>$("conn").classList.remove("off");
     es.onerror=()=>$("conn").classList.add("off");
     es.onmessage=ev=>{ let m; try{m=JSON.parse(ev.data);}catch(_){return;}
-      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); loadLog(); return; }
+      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); loadLog(); return; }
       applyRemote(m); }; }
   function applyRemote(m){
     if(typeof m.v!=='number')return;
@@ -731,11 +796,12 @@
       case 'setCounter': { const p=P(op.id); if(p){p[op.key]=op.value; setInput('ctr:'+op.id+':'+op.key,op.value);} break; }
       case 'counterDelta': { const p=P(op.id); if(p){p[op.key]=Math.max(0,(p[op.key]||0)+op.delta); setInput('ctr:'+op.id+':'+op.key,p[op.key]);} break; }
       case 'setScore': { const p=P(op.id); if(p){p[op.key]=op.value; setInput('score:'+op.id+':'+op.key,op.value==null?'':op.value);} break; }
-      case 'addRoster': if(!roster.some(r=>r.id===op.person.id)){roster.push(op.person);rebuildDatalist();renderRosterAdmin();} return;
-      case 'renameRoster': { const r=roster.find(x=>x.id===op.id); if(r)r.name=op.name; state.players.forEach(p=>{if(p.rosterId===op.id)p.name=op.name;}); rebuildDatalist(); renderRosterAdmin(); renderAll(); return; }
-      case 'setRosterActive': { const r=roster.find(x=>x.id===op.id); if(r){r.active=op.active; r.leftAt=op.leftAt||null;} rebuildDatalist(); renderRosterAdmin(); return; }
+      case 'addRoster': if(!roster.some(r=>r.id===op.person.id)){roster.push(op.person);rebuildDatalist();renderRosterAdmin();renderDirectory();} return;
+      case 'renameRoster': { const r=roster.find(x=>x.id===op.id); if(r)r.name=op.name; state.players.forEach(p=>{if(p.rosterId===op.id)p.name=op.name;}); rebuildDatalist(); renderRosterAdmin(); renderDirectory(); renderAll(); return; }
+      case 'setRosterActive': { const r=roster.find(x=>x.id===op.id); if(r){r.active=op.active; r.leftAt=op.leftAt||null;} rebuildDatalist(); renderRosterAdmin(); renderDirectory(); return; }
       case 'setRosterDues': { const r=roster.find(x=>x.id===op.id); if(r){r.duesLiable=op.duesLiable;} renderRosterAdmin(); return; }
-      case 'removeRoster': roster=roster.filter(x=>x.id!==op.id); rebuildDatalist(); renderRosterAdmin(); return;
+      case 'setRosterContact': { const r=roster.find(x=>x.id===op.id); if(r&&op.fields){ Object.keys(op.fields).forEach(k=>{ r[k]=op.fields[k]; }); } renderDirectory(); return; }
+      case 'removeRoster': roster=roster.filter(x=>x.id!==op.id); rebuildDatalist(); renderRosterAdmin(); renderDirectory(); return;
       case 'archiveChanged': if(currentView==='archive')loadArchive(); if(currentView==='stats')loadStats(); return;
     }
     updateDerived();
@@ -936,6 +1002,83 @@
     if(roster.some(r=>r.name.toLowerCase()===nm.toLowerCase())){toast("Name existiert bereits.");return;}
     opStruct({type:'addRoster',name:nm}); $("nr_name").value=""; });
   $("nr_name").addEventListener("keydown",e=>{if(e.key==='Enter')$("nr_add").click();});
+
+  // ---------- Mitgliedsverzeichnis ----------
+  const DIR_FIELDS=['telefonPrivat','telefonDienst','handy','adresse','geburtsdatum','emailPrivat','emailDienst','mxid'];
+  const DIR_LABELS={name:'Name',telefonPrivat:'Telefon privat',telefonDienst:'Telefon dienstlich',handy:'Handy',adresse:'Adresse',geburtsdatum:'Geburtsdatum',emailPrivat:'E-Mail privat',emailDienst:'E-Mail dienstlich',mxid:'MXID'};
+  let dirEditId=null;
+  const telLink=v=>v?('<a href="tel:'+encodeURIComponent(v)+'">'+esc(v)+'</a>'):'<span class="dir-empty" style="padding:0">–</span>';
+  const mailLink=v=>v?('<a href="mailto:'+encodeURIComponent(v)+'">'+esc(v)+'</a>'):'<span class="dir-empty" style="padding:0">–</span>';
+  const dirCell=v=>v?esc(v):'<span class="dir-empty" style="padding:0">–</span>';
+  function dirMatch(r,ql){ if(!ql)return true; const hay=[r.name,r.telefonPrivat,r.telefonDienst,r.handy,r.emailPrivat,r.emailDienst,r.adresse,r.mxid,r.geburtsdatum].join(' ').toLowerCase(); return hay.indexOf(ql)!==-1; }
+  function renderDirectory(){ const tb=$("dirTable"); if(!tb)return; const manage=me&&effManage();
+    $("dir_add").classList.toggle("hidden",!manage);
+    const ql=($("dir_search").value||"").trim().toLowerCase();
+    const showInactive=$("dir_inactive").checked;
+    let list=roster.slice().filter(r=>(showInactive||r.active!==false)&&dirMatch(r,ql)).sort((a,b)=>a.name.localeCompare(b.name));
+    if(!list.length){ tb.innerHTML='<tr><td colspan="10" class="dir-empty">'+(roster.length?'Keine Treffer.':'Noch keine Mitglieder im Stamm.')+'</td></tr>'; return; }
+    tb.innerHTML=list.map(r=>{
+      const inact=r.active===false?' dir-inactive':'';
+      const act=manage?'<button class="btn ghost sm" data-diredit="'+r.id+'">Bearbeiten</button>':'';
+      return '<tr class="'+inact+'"><td class="dircell-name">'+esc(r.name)+(r.active===false?' <span style="color:var(--muted);font-size:.8em">(inaktiv)</span>':'')+'</td>'+
+        '<td>'+telLink(r.telefonPrivat)+'</td><td>'+telLink(r.telefonDienst)+'</td><td>'+telLink(r.handy)+'</td>'+
+        '<td>'+mailLink(r.emailPrivat)+'</td><td>'+mailLink(r.emailDienst)+'</td>'+
+        '<td>'+(r.geburtsdatum?esc(fmtLeft(r.geburtsdatum)):'<span class="dir-empty" style="padding:0">–</span>')+'</td>'+
+        '<td>'+dirCell(r.adresse)+'</td><td>'+dirCell(r.mxid)+'</td>'+
+        '<td style="text-align:right">'+act+'</td></tr>';
+    }).join("");
+    tb.querySelectorAll('[data-diredit]').forEach(b=>b.addEventListener("click",()=>openDirEdit(Number(b.dataset.diredit))));
+  }
+  function openDirEdit(id){ const r=roster.find(x=>x.id===id); if(!r)return; dirEditId=id;
+    $("dd_title").textContent="Mitglied: "+r.name; $("dd_err").textContent="";
+    $("dd_name").value=r.name||"";
+    DIR_FIELDS.forEach(k=>{ const el=$("dd_"+k); if(el)el.value=r[k]||""; });
+    $("dirdlg").classList.remove("hidden"); setTimeout(()=>$("dd_name").focus(),50);
+  }
+  function closeDirEdit(){ $("dirdlg").classList.add("hidden"); dirEditId=null; }
+  function saveDirEdit(){ if(dirEditId==null)return; const r=roster.find(x=>x.id===dirEditId); if(!r){closeDirEdit();return;}
+    $("dd_err").textContent="";
+    const newName=$("dd_name").value.trim();
+    if(!newName){ $("dd_err").textContent="Name darf nicht leer sein."; return; }
+    if(newName.toLowerCase()!==r.name.toLowerCase() && roster.some(x=>x.id!==r.id && x.name.toLowerCase()===newName.toLowerCase())){ $("dd_err").textContent="Name existiert bereits."; return; }
+    const gb=$("dd_geburtsdatum").value; if(gb && !/^\d{4}-\d{2}-\d{2}$/.test(gb)){ $("dd_err").textContent="Geburtsdatum ungültig."; return; }
+    if(newName!==r.name) opStruct({type:'renameRoster',id:r.id,name:newName});
+    const fields={}; DIR_FIELDS.forEach(k=>{ fields[k]=$("dd_"+k).value.trim(); });
+    opStruct({type:'setRosterContact',id:r.id,fields});
+    closeDirEdit(); toast("Gespeichert.");
+  }
+  $("dir_search").addEventListener("input",renderDirectory);
+  $("dir_inactive").addEventListener("change",renderDirectory);
+  $("dd_save").addEventListener("click",saveDirEdit);
+  $("dd_cancel").addEventListener("click",closeDirEdit);
+  $("dirdlg").addEventListener("click",e=>{ if(e.target===$("dirdlg"))closeDirEdit(); });
+  $("dir_add").addEventListener("click",()=>{ const nm=prompt("Name des neuen Mitglieds:"); if(!nm||!nm.trim())return;
+    if(roster.some(r=>r.name.toLowerCase()===nm.trim().toLowerCase())){toast("Name existiert bereits.");return;}
+    opStruct({type:'addRoster',name:nm.trim()}); toast("Angelegt – jetzt Kontaktdaten ergänzen."); });
+  // CSV-Export (aktuelle Filterung)
+  function dirCurrentList(){ const ql=($("dir_search").value||"").trim().toLowerCase(); const showInactive=$("dir_inactive").checked;
+    return roster.slice().filter(r=>(showInactive||r.active!==false)&&dirMatch(r,ql)).sort((a,b)=>a.name.localeCompare(b.name)); }
+  function dlBlob(text,mime,fname){ const blob=new Blob([text],{type:mime}); const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=fname; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),2000); }
+  $("dir_export").addEventListener("click",()=>{ const list=dirCurrentList();
+    const cols=['name'].concat(DIR_FIELDS); const head=cols.map(c=>DIR_LABELS[c]);
+    const csvCell=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+    const rows=list.map(r=>cols.map(c=>csvCell(r[c])).join(';'));
+    const csv='\ufeff'+[head.map(csvCell).join(';')].concat(rows).join('\r\n');
+    dlBlob(csv,'text/csv;charset=utf-8','KKk58-Mitgliederverzeichnis-'+new Date().toISOString().slice(0,10)+'.csv'); toast('CSV erstellt.'); });
+  $("dir_vcf").addEventListener("click",()=>{ const list=dirCurrentList(); let vcf='';
+    list.forEach(r=>{ vcf+='BEGIN:VCARD\r\nVERSION:3.0\r\n'; vcf+='FN:'+(r.name||'').replace(/[\r\n]/g,' ')+'\r\n';
+      if(r.telefonPrivat)vcf+='TEL;TYPE=HOME,VOICE:'+r.telefonPrivat+'\r\n';
+      if(r.telefonDienst)vcf+='TEL;TYPE=WORK,VOICE:'+r.telefonDienst+'\r\n';
+      if(r.handy)vcf+='TEL;TYPE=CELL:'+r.handy+'\r\n';
+      if(r.emailPrivat)vcf+='EMAIL;TYPE=HOME:'+r.emailPrivat+'\r\n';
+      if(r.emailDienst)vcf+='EMAIL;TYPE=WORK:'+r.emailDienst+'\r\n';
+      if(r.adresse)vcf+='ADR;TYPE=HOME:;;'+r.adresse.replace(/[\r\n]/g,' ').replace(/;/g,'\\;')+';;;\r\n';
+      if(r.geburtsdatum)vcf+='BDAY:'+r.geburtsdatum+'\r\n';
+      if(r.mxid)vcf+='IMPP:matrix:'+r.mxid+'\r\n';
+      vcf+='END:VCARD\r\n'; });
+    if(!vcf){toast('Keine Einträge.');return;}
+    dlBlob(vcf,'text/vcard;charset=utf-8','KKk58-Mitglieder-'+new Date().toISOString().slice(0,10)+'.vcf'); toast('vCard erstellt.'); });
 
   // ---------- Archiv ----------
   async function loadArchive(){ $("arcDetail").classList.add("hidden"); $("arcList").classList.remove("hidden"); $("arcToolbar").style.display="";

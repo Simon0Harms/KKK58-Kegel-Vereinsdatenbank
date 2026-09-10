@@ -55,6 +55,23 @@ function normPlayer(p) {
     c9: cint(p.c9, 0, 99999, 0), cK: cint(p.cK != null ? p.cK : p.cS, 0, 99999, 0), cP: cint(p.cP, 0, 99999, 0),
     b1: nscore(p.b1), b2: nscore(p.b2), s1: nscore(p.s1), s2: nscore(p.s2) };
 }
+// ---------- Mitgliedsverzeichnis: Kontaktfelder ----------
+// Zusatzangaben je Stamm-Person (Verzeichnis). Freitext mit Längenbegrenzung;
+// geburtsdatum als YYYY-MM-DD oder null. Werte werden mit dem Stamm live synchronisiert.
+const CONTACT_KEYS = ['telefonPrivat', 'telefonDienst', 'handy', 'adresse', 'geburtsdatum', 'emailPrivat', 'emailDienst', 'mxid'];
+const CONTACT_MAX = { telefonPrivat: 40, telefonDienst: 40, handy: 40, adresse: 200, emailPrivat: 120, emailDienst: 120, mxid: 255 };
+function normDate(v) { const s = String(v == null ? '' : v).trim(); return /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s)) ? s : null; }
+// Kontaktobjekt aus beliebiger Quelle säubern (nur bekannte Felder, getrimmt, gekappt)
+function normContact(src) {
+  const o = {};
+  for (const k of CONTACT_KEYS) {
+    if (k === 'geburtsdatum') { o[k] = normDate(src && src[k]); continue; }
+    o[k] = String((src && src[k]) || '').trim().slice(0, CONTACT_MAX[k]);
+  }
+  return o;
+}
+// Leere Kontaktfelder (für neu angelegte Stamm-Personen)
+function emptyContact() { const o = {}; for (const k of CONTACT_KEYS) o[k] = (k === 'geburtsdatum') ? null : ''; return o; }
 function loadDb() {
   try {
     const j = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
@@ -66,7 +83,7 @@ function loadDb() {
     const nowP = Date.now();
     db.users.forEach(u => { if (u.matrixPending && !(u.matrixPending.expires > nowP)) delete u.matrixPending; });
     db.seqUser = j.seqUser || db.users.length;
-    db.roster = Array.isArray(j.roster) ? j.roster.map(r => ({ id: r.id, name: String(r.name || ''), active: r.active !== false, leftAt: (r.leftAt && /^\d{4}-\d{2}-\d{2}$/.test(r.leftAt)) ? r.leftAt : null, duesLiable: r.duesLiable !== false })) : [];
+    db.roster = Array.isArray(j.roster) ? j.roster.map(r => Object.assign({ id: r.id, name: String(r.name || ''), active: r.active !== false, leftAt: (r.leftAt && /^\d{4}-\d{2}-\d{2}$/.test(r.leftAt)) ? r.leftAt : null, duesLiable: r.duesLiable !== false }, normContact(r))) : [];
     db.seqRoster = j.seqRoster || db.roster.reduce((m, r) => Math.max(m, r.id), 0);
     db.sheet = Object.assign(emptySheet(), j.sheet || {});
     db.sheet.lanes = Object.assign({ bohle: true, schere: false }, db.sheet.lanes || {});
@@ -185,6 +202,7 @@ function describeOp(op, ctx) {
     case 'renameRoster': return 'Stamm: umbenannt in ' + op.name;
     case 'setRosterActive': return 'Stamm: Spieler ' + (op.active ? 'aktiviert' : ('deaktiviert' + (op.leftAt ? ' (Austritt ' + op.leftAt + ')' : '')));
     case 'setRosterDues': return 'Stamm: Beitragspflicht ' + (op.duesLiable ? 'aktiviert' : 'deaktiviert');
+    case 'setRosterContact': return 'Verzeichnis: Kontaktdaten geändert (' + rosterNameById(op.id) + ')';
     case 'removeRoster': return 'Stamm: Spieler gelöscht';
     case 'archiveChanged': return op.removed ? 'Spiel aus Archiv gelöscht' : 'Spiel gespeichert';
     default: return op.type;
@@ -550,7 +568,7 @@ function applyOp(op, user) {
         person = db.roster.find(r => r.name.toLowerCase() === nm.toLowerCase());
         if (!person) {
           if (!op.createRoster) return null; // nicht im Stamm und kein Anlege-Auftrag
-          person = { id: ++db.seqRoster, name: nm.slice(0, 60), active: true, duesLiable: true }; db.roster.push(person); newPerson = person;
+          person = Object.assign({ id: ++db.seqRoster, name: nm.slice(0, 60), active: true, duesLiable: true }, emptyContact()); db.roster.push(person); newPerson = person;
         }
       }
       const p = { id: ++s.seq, rosterId: person.id, name: person.name, c9: 0, cK: 0, cP: 0, b1: null, b2: null, s1: null, s2: null };
@@ -566,10 +584,20 @@ function applyOp(op, user) {
     case 'reset': { if (!canManage(user.role)) return null; s.players = []; s.seq = 0; return { type: 'reset' }; }
     case 'newGame': { s.players = []; s.seq = 0; s.event = ''; s.pumpen = ''; s.note = ''; return { type: 'newGame' }; }
     // ----- Spielerstamm -----
-    case 'addRoster': { const nm = String(op.name || '').trim(); if (!nm) return null; if (db.roster.some(r => r.name.toLowerCase() === nm.toLowerCase())) return null; const person = { id: ++db.seqRoster, name: nm.slice(0, 60), active: true, leftAt: null, duesLiable: true }; db.roster.push(person); return { type: 'addRoster', person }; }
+    case 'addRoster': { const nm = String(op.name || '').trim(); if (!nm) return null; if (db.roster.some(r => r.name.toLowerCase() === nm.toLowerCase())) return null; const person = Object.assign({ id: ++db.seqRoster, name: nm.slice(0, 60), active: true, leftAt: null, duesLiable: true }, emptyContact()); db.roster.push(person); return { type: 'addRoster', person }; }
     case 'renameRoster': { if (!canManage(user.role)) return null; const r = db.roster.find(x => x.id === Number(op.id)); if (!r) return null; const nm = String(op.name || '').trim(); if (nm) r.name = nm.slice(0, 60); return { type: 'renameRoster', id: r.id, name: r.name }; }
     case 'setRosterActive': { if (!canManage(user.role)) return null; const r = db.roster.find(x => x.id === Number(op.id)); if (!r) return null; r.active = !!op.active; if (r.active) r.leftAt = null; else r.leftAt = (op.leftAt && /^\d{4}-\d{2}-\d{2}$/.test(op.leftAt) && !isNaN(Date.parse(op.leftAt))) ? op.leftAt : null; return { type: 'setRosterActive', id: r.id, active: r.active, leftAt: r.leftAt }; }
     case 'setRosterDues': { if (!canManage(user.role)) return null; const r = db.roster.find(x => x.id === Number(op.id)); if (!r) return null; r.duesLiable = !!op.duesLiable; return { type: 'setRosterDues', id: r.id, duesLiable: r.duesLiable }; }
+    case 'setRosterContact': {
+      if (!canManage(user.role)) return null;
+      const r = db.roster.find(x => x.id === Number(op.id)); if (!r) return null;
+      const patch = normContact(op.fields || {});
+      const fields = {};
+      // nur die tatsächlich übergebenen Felder ändern
+      for (const k of CONTACT_KEYS) { if (op.fields && Object.prototype.hasOwnProperty.call(op.fields, k)) { r[k] = patch[k]; fields[k] = patch[k]; } }
+      if (Object.keys(fields).length === 0) return null;
+      return { type: 'setRosterContact', id: r.id, fields };
+    }
     case 'removeRoster': { if (!canManage(user.role)) return null; const b = db.roster.length; db.roster = db.roster.filter(x => x.id !== Number(op.id)); if (db.roster.length === b) return null; db.users.forEach(u => { if (u.rosterId === Number(op.id)) u.rosterId = null; }); return { type: 'removeRoster', id: Number(op.id) }; }
     // ----- Archiv -----
     case 'saveGame': {
