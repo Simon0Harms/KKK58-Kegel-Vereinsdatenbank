@@ -45,7 +45,7 @@ function emptySheet() {
   return { event: '', date: '', lanes: { bohle: true, schere: false }, priceNK: 1, pricePump: 0.1,
     pumpen: '', note: '', seq: 0, players: [], updatedBy: '', updatedAt: 0 };
 }
-let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
+let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
 const LOG_MAX = 400;
 
 function cint(v, mn, mx, fb) { let n = Math.round(Number(v)); if (!isFinite(n)) return fb; return Math.min(mx, Math.max(mn, n)); }
@@ -72,6 +72,31 @@ function normContact(src) {
 }
 // Leere Kontaktfelder (für neu angelegte Stamm-Personen)
 function emptyContact() { const o = {}; for (const k of CONTACT_KEYS) o[k] = (k === 'geburtsdatum') ? null : ''; return o; }
+
+// ---------- Preise / Wanderpreise ----------
+// Beschreibung je Preis: Titel + drei Freitextblöcke (Einleitung, Vergabe-Regel, Bewertung der Würfe).
+// Freitext mit Zeilenumbrüchen, längenbegrenzt. Titel ist Pflicht; leere Preise werden verworfen.
+const PRIZE_TEXT_MAX = 6000;
+function normText(v) { return String(v == null ? '' : v).replace(/\r\n/g, '\n').replace(/\r/g, '\n').slice(0, PRIZE_TEXT_MAX); }
+function normPrize(src) {
+  return {
+    id: (src && src.id != null) ? Number(src.id) : null,
+    title: String((src && src.title) || '').trim().slice(0, 120),
+    intro: normText(src && src.intro),
+    rules: normText(src && src.rules),
+    evaluation: normText(src && src.evaluation)
+  };
+}
+// Startdatensatz (W-Weber-Preis) für frische bzw. auf Preise migrierte Datenbanken
+function seedPrizes() {
+  db.prizes = [{
+    id: ++db.seqPrizes,
+    title: 'W-Weber-Preis (Wolf-Weber-Kegeln)',
+    intro: 'Zum Gedenken an unseren am 30. Dezember 1985 verstorbenen Kegelbruder Wolf Weber, vergibt der Kegelklub KONUS 58 einen Wanderpreis.\n\nAllen älteren Kegelbrüdern ist bekannt, dass Wolf Weber ein sehr „gleichmäßiger" Kegler war. Dieses fiel spätestens dann auf, wenn das Display mal wieder einen „Staketenzaun" von Siebenen anzeigte. Dieser „Stil" ist maßgeblich für die nachfolgend niedergeschriebenen Regeln zur Vergabe der Trophäe.',
+    rules: 'Jeder Kegelbruder kann auf der Bohlenbahn jederzeit die Trophäe erringen.\n\nDazu müssen auf der zehnstelligen Wurfanzeige mindestens 7 Siebenen hintereinander angezeigt werden.\n\nAlternativ können auch mindestens 8 Achten hintereinander angemeldet werden.',
+    evaluation: 'Den Anspruch auf den Preis muss der Kegler selbst anmelden! Die Schriftwarte sind in diesem Falle für die Beobachtung der Anzeige nicht verantwortlich. Sie notieren allerdings die Anzahl der Siebenen sowie den Durchgang und das Datum.\n\nErheben an einem Abend mehrere Kegelbrüder den Anspruch auf den Preis, so ist derjenige mit den meisten hintereinander angezeigten Siebenen der Gewinner.\n\nAls Wanderpreis ist eine Plakette ausgelobt, auf welcher derjenige Kegelbruder seinen Namen, die Anzahl der Siebenen und das Datum eingravieren lassen darf, der als erster im Kalenderjahr die höchste Anzahl von „777…" angemeldet hat (Mit gilt nicht!). Der Preis wird jeweils am ersten Kegelabend im neuen Jahr vergeben. Die Plakette verbleibt jeweils solange im Besitz des Gewinners, bis im Folgejahr ein weiterer Name eingraviert wird.'
+  }];
+}
 function loadDb() {
   try {
     const j = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
@@ -90,6 +115,10 @@ function loadDb() {
     db.sheet.players = Array.isArray(db.sheet.players) ? db.sheet.players.map(normPlayer) : [];
     db.archive = Array.isArray(j.archive) ? j.archive : [];
     db.seqArchive = j.seqArchive || db.archive.reduce((m, a) => Math.max(m, a.id), 0);
+    db.prizes = Array.isArray(j.prizes) ? j.prizes.map(normPrize).filter(p => p.id != null && p.title) : [];
+    db.seqPrizes = j.seqPrizes || db.prizes.reduce((m, p) => Math.max(m, p.id), 0);
+    // Migration älterer Datenbanken ohne Preise: W-Weber-Preis als Startdatensatz anlegen
+    if (!Object.prototype.hasOwnProperty.call(j, 'prizes')) seedPrizes();
     db.log = Array.isArray(j.log) ? j.log.slice(-LOG_MAX) : [];
     const nowL = Date.now();
     db.invites = Array.isArray(j.invites) ? j.invites.filter(x => x && !x.used && x.expires > nowL) : [];
@@ -99,7 +128,7 @@ function loadDb() {
     const cs = j.cashSettings || {};
     db.cashSettings = { duesCent: Number.isFinite(cs.duesCent) ? cs.duesCent : 2000, absenceCent: Number.isFinite(cs.absenceCent) ? cs.absenceCent : 100, expenseCent: Number.isFinite(cs.expenseCent) ? cs.expenseCent : 3500, duesStartMonth: /^\d{4}-\d{2}$/.test(cs.duesStartMonth) ? cs.duesStartMonth : null };
     db.version = j.version || 0;
-  } catch (_) { /* Erststart */ }
+  } catch (_) { /* Erststart */ seedPrizes(); }
 }
 let saveTimer = null;
 function saveDb() { clearTimeout(saveTimer); saveTimer = setTimeout(flushDb, 250); }
@@ -244,6 +273,9 @@ function describeOp(op, ctx) {
     case 'setRosterContact': return 'Verzeichnis: Kontaktdaten geändert (' + rosterNameById(op.id) + ')';
     case 'removeRoster': return 'Stamm: Spieler gelöscht';
     case 'archiveChanged': return op.removed ? 'Spiel aus Archiv gelöscht' : 'Spiel gespeichert';
+    case 'addPrize': return 'Preis angelegt: ' + (op.prize ? op.prize.title : '');
+    case 'updatePrize': return 'Preis bearbeitet: ' + (op.prize ? op.prize.title : '');
+    case 'removePrize': return 'Preis gelöscht';
     default: return op.type;
   }
 }
@@ -652,6 +684,26 @@ function applyOp(op, user) {
       return { type: 'archiveChanged', id: snap.id };
     }
     case 'deleteGame': { if (!canManage(user.role)) return null; const b = db.archive.length; db.archive = db.archive.filter(a => a.id !== Number(op.id)); if (db.archive.length === b) return null; db.ledger = db.ledger.filter(e => !(e.kind === 'game' && e.meta && e.meta.archiveId === Number(op.id))); return { type: 'archiveChanged', id: Number(op.id), removed: true }; }
+    // ----- Preise (Anlegen/Bearbeiten/Löschen nur mit Verwaltungsrecht) -----
+    case 'addPrize': {
+      if (!canManage(user.role)) return null;
+      const p = normPrize(op.prize || {}); if (!p.title) return null;
+      p.id = ++db.seqPrizes; db.prizes.push(p);
+      return { type: 'addPrize', prize: p };
+    }
+    case 'updatePrize': {
+      if (!canManage(user.role)) return null;
+      const cur = db.prizes.find(x => x.id === Number(op.id)); if (!cur) return null;
+      const p = normPrize(Object.assign({}, op.prize, { id: cur.id })); if (!p.title) return null;
+      cur.title = p.title; cur.intro = p.intro; cur.rules = p.rules; cur.evaluation = p.evaluation;
+      return { type: 'updatePrize', id: cur.id, prize: cur };
+    }
+    case 'removePrize': {
+      if (!canManage(user.role)) return null;
+      const b = db.prizes.length; db.prizes = db.prizes.filter(x => x.id !== Number(op.id));
+      if (db.prizes.length === b) return null;
+      return { type: 'removePrize', id: Number(op.id) };
+    }
     default: return null;
   }
 }
@@ -837,7 +889,7 @@ function handle(req, res) {
     catch (e) { return send(res, 400, { error: 'Daten zu lang für QR' }); }
   }
   if (api === '/logout' && req.method === 'POST') { clearSessionCookie(res); return send(res, 200, { ok: true }); }
-  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
+  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
   if (api === '/roster' && req.method === 'GET') return send(res, 200, { roster: db.roster });
   if (api === '/archive' && req.method === 'GET') return send(res, 200, { archive: db.archive.map(archiveMeta).sort((a, b) => b.savedAt - a.savedAt) });
   if (api === '/export' && req.method === 'GET') {
@@ -863,7 +915,7 @@ function handle(req, res) {
   if (api === '/events' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.write('retry: 3000\n\n');
-    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes }) + '\n\n');
     const c = { res, uid: me.id }; clients.add(c); req.on('close', () => clients.delete(c)); return;
   }
 

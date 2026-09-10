@@ -239,6 +239,21 @@
   .dirtable .btn{white-space:nowrap}
   .dir-empty{color:var(--muted);padding:14px 6px}
   .dirdlg{max-width:640px}
+  .dirdlg textarea{width:100%;box-sizing:border-box;resize:vertical;font:inherit;min-height:70px}
+  .prizeintro{color:var(--muted);font-size:.9rem}
+  .prizelist{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+  details.prize{background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);overflow:hidden}
+  details.prize>summary{cursor:pointer;list-style:none;padding:14px 16px;display:flex;align-items:center;gap:10px;font-weight:700}
+  details.prize>summary::-webkit-details-marker{display:none}
+  details.prize>summary .chev{transition:transform .15s;color:var(--muted);flex:0 0 auto}
+  details.prize[open]>summary .chev{transform:rotate(90deg)}
+  details.prize>summary .ptitle{flex:1}
+  .prizebody{padding:2px 16px 16px;border-top:1px solid var(--line)}
+  .prizesec{margin-top:12px}
+  .prizesec h4{margin:0 0 4px;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+  .prizesec .ptext{white-space:pre-wrap;line-height:1.5}
+  .prizeadmin{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+  .prizeempty{color:var(--muted);padding:18px 4px;text-align:center}
   .dirgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:6px}
   .dirgrid .dirfull{grid-column:1 / -1}
   .dirgrid .fld label{display:block;font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 4px}
@@ -362,6 +377,7 @@
       <button id="nav_archive" type="button">Archiv</button>
       <button id="nav_stats" type="button">Statistik</button>
       <button id="nav_dir" type="button">Verzeichnis</button>
+      <button id="nav_prizes" type="button">Preise</button>
       <button id="nav_cash" type="button" class="hidden">Kasse</button>
       <div class="btnrow" id="sheetBtns">
         <button id="btn_focus" type="button" title="Nur die Liste anzeigen (Menü ausblenden)">⛶ Nur Liste</button>
@@ -483,6 +499,17 @@
     </tr></thead><tbody id="dirTable"></tbody></table></div>
     <p class="foot" style="text-align:left">Kontaktdaten sind für alle angemeldeten Mitglieder sichtbar. Bearbeiten nur mit Verwaltungsrecht (Admin, Kassenwart, Mitglied).</p>
   </section>
+
+  <!-- ===== PREISE ===== -->
+  <section id="view_prizes" class="hidden">
+    <div class="dirbar">
+      <span class="prizeintro">Ausgelobte Preise des Vereins. Auf einen Preis tippen, um die Beschreibung aufzuklappen.</span>
+      <span style="flex:1"></span>
+      <button class="btn prim sm hidden" id="prize_add" type="button">＋ Preis</button>
+    </div>
+    <div id="prizeList" class="prizelist"></div>
+    <p class="foot" id="prizeFoot" style="text-align:left">Die Preisliste ist für alle angemeldeten Mitglieder sichtbar. Anlegen, Bearbeiten und Löschen nur mit Verwaltungsrecht (Admin, Kassenwart, Mitglied).</p>
+  </section>
 </div>
 
 <!-- VERZEICHNIS: Bearbeiten-Dialog -->
@@ -505,6 +532,23 @@
     <div class="ddrow">
       <button class="btn prim" id="dd_save" type="button">Speichern</button>
       <button class="btn" id="dd_cancel" type="button">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
+<!-- PREISE: Bearbeiten-Dialog -->
+<div id="prizedlg" class="ovl hidden">
+  <div class="login dirdlg">
+    <div class="eyebrow">Preise</div>
+    <h1 id="pz_title">Preis bearbeiten</h1>
+    <div class="fld"><label>Titel</label><input id="pz_name" type="text" placeholder="z. B. W-Weber-Preis" autocapitalize="words"></div>
+    <div class="fld"><label>Einleitung</label><textarea id="pz_intro" rows="4" placeholder="Einleitung / Hintergrund des Preises …"></textarea></div>
+    <div class="fld"><label>Regel für die Vergabe des Preises</label><textarea id="pz_rules" rows="4" placeholder="Wie wird der Preis errungen? …"></textarea></div>
+    <div class="fld"><label>Bewertung der Würfe</label><textarea id="pz_eval" rows="4" placeholder="Wie werden die Würfe bewertet? …"></textarea></div>
+    <div class="dderr err" id="pz_err"></div>
+    <div class="ddrow">
+      <button class="btn prim" id="pz_save" type="button">Speichern</button>
+      <button class="btn" id="pz_cancel" type="button">Abbrechen</button>
     </div>
   </div>
 </div>
@@ -554,7 +598,7 @@
   const canManage=r=>r==="admin"||r==="kassenwart"||r==="mitglied";
   const canCash=r=>r==="admin"||r==="kassenwart";
   const roleLabel=r=>ROLE_LABEL[r]||r;
-  let me=null, state=null, roster=[], version=0, es=null, currentView="sheet", sortMode="arrival";
+  let me=null, state=null, roster=[], prizes=[], version=0, es=null, currentView="sheet", sortMode="arrival";
   const pending=new Set();
   const rid=()=> (crypto.randomUUID? crypto.randomUUID() : String(Date.now())+Math.random());
   const $=id=>document.getElementById(id);
@@ -598,7 +642,7 @@
     $("adminPanel").hidden=!manage; $("nav_cash").classList.remove("hidden");
     const seg=$("rvSeg"); if(seg) seg.querySelectorAll("button").forEach(b=>b.classList.toggle("active", b.dataset.vr===eff));
     $("rvNote").textContent = viewRole ? "Nur Vorschau – deine echten Rechte bleiben Admin." : "";
-    renderRosterAdmin(); renderDirectory(); if(currentView==="archive") loadArchive(); if(currentView==="cash"&&cashData) renderCash(); }
+    renderRosterAdmin(); renderDirectory(); renderPrizes(); if(currentView==="archive") loadArchive(); if(currentView==="cash"&&cashData) renderCash(); }
   function setViewRole(r){ if(!(me&&me.role==='admin'))return; viewRole = (r==='admin'||r===me.role) ? null : r; applyRoleUI(); }
   function showApp(){ $("view_invite").classList.add("hidden"); $("view_login").classList.add("hidden"); $("view_app").classList.remove("hidden");
     if(!(me&&me.role==='admin')) viewRole=null;
@@ -732,7 +776,7 @@
   $("pw_new2").addEventListener("keydown",e=>{if(e.key==='Enter')submitPw();});
 
   async function loadState(){ const r=await api('/state');
-    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); loadLog();
+    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; prizes=r.data.prizes||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); loadLog();
       if(me&&me.mustChangePassword&&$("pwdlg").classList.contains("hidden")) openPwDialog(); }
     else if(r.status===401) showLogin(); }
   function resync(){ loadState(); }
@@ -745,16 +789,19 @@
     $("view_stats").classList.toggle("hidden",v!=="stats");
     $("view_cash").classList.toggle("hidden",v!=="cash");
     $("view_directory").classList.toggle("hidden",v!=="dir");
+    $("view_prizes").classList.toggle("hidden",v!=="prizes");
     $("sheetBtns").style.display = v==="sheet" ? "" : "none";
     $("nav_sheet").classList.toggle("active",v==="sheet");
     $("nav_archive").classList.toggle("active",v==="archive");
     $("nav_stats").classList.toggle("active",v==="stats");
     $("nav_cash").classList.toggle("active",v==="cash");
     $("nav_dir").classList.toggle("active",v==="dir");
+    $("nav_prizes").classList.toggle("active",v==="prizes");
     if(v==="archive") loadArchive();
     if(v==="stats") loadStats();
     if(v==="cash") loadCash();
     if(v==="dir") renderDirectory();
+    if(v==="prizes") renderPrizes();
   }
   // Fokus-Modus: nur die Liste zum Eintragen (Menü/Kopf ausgeblendet)
   function updateFocusMeta(){ const ev=($("f_event").value||"").trim(), dt=$("f_date").value||""; $("fbMeta").textContent=[ev,dt].filter(Boolean).join(" · "); }
@@ -764,6 +811,7 @@
   $("nav_stats").addEventListener("click",()=>setView("stats"));
   $("nav_cash").addEventListener("click",()=>setView("cash"));
   $("nav_dir").addEventListener("click",()=>setView("dir"));
+  $("nav_prizes").addEventListener("click",()=>setView("prizes"));
   $("rvSeg").addEventListener("click",e=>{ const b=e.target.closest("button[data-vr]"); if(b)setViewRole(b.dataset.vr); });
   $("btn_focus").addEventListener("click",()=>setFocus(true));
   $("fb_exit").addEventListener("click",()=>setFocus(false));
@@ -774,7 +822,7 @@
     es.onopen=()=>$("conn").classList.remove("off");
     es.onerror=()=>$("conn").classList.add("off");
     es.onmessage=ev=>{ let m; try{m=JSON.parse(ev.data);}catch(_){return;}
-      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); loadLog(); return; }
+      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; prizes=m.prizes||prizes; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); loadLog(); return; }
       applyRemote(m); }; }
   function applyRemote(m){
     if(typeof m.v!=='number')return;
@@ -809,6 +857,9 @@
       case 'setRosterContact': { const r=roster.find(x=>x.id===op.id); if(r&&op.fields){ Object.keys(op.fields).forEach(k=>{ r[k]=op.fields[k]; }); } renderDirectory(); return; }
       case 'removeRoster': roster=roster.filter(x=>x.id!==op.id); rebuildDatalist(); renderRosterAdmin(); renderDirectory(); return;
       case 'archiveChanged': if(currentView==='archive')loadArchive(); if(currentView==='stats')loadStats(); return;
+      case 'addPrize': if(op.prize && !prizes.some(p=>p.id===op.prize.id)) prizes.push(op.prize); renderPrizes(); return;
+      case 'updatePrize': { const i=prizes.findIndex(p=>p.id===op.id); if(i>=0 && op.prize) prizes[i]=op.prize; renderPrizes(); return; }
+      case 'removePrize': prizes=prizes.filter(p=>p.id!==op.id); renderPrizes(); return;
     }
     updateDerived();
   }
@@ -1061,6 +1112,47 @@
   $("dir_add").addEventListener("click",()=>{ const nm=prompt("Name des neuen Mitglieds:"); if(!nm||!nm.trim())return;
     if(roster.some(r=>r.name.toLowerCase()===nm.trim().toLowerCase())){toast("Name existiert bereits.");return;}
     opStruct({type:'addRoster',name:nm.trim()}); toast("Angelegt – jetzt Kontaktdaten ergänzen."); });
+
+  // ---------- Preise (Akkordeon-Liste) ----------
+  let prizeEditId=null;
+  function prizeSection(label,text){ if(!String(text||"").trim())return "";
+    return '<div class="prizesec"><h4>'+esc(label)+'</h4><div class="ptext">'+esc(text)+'</div></div>'; }
+  function renderPrizes(){ const box=$("prizeList"); if(!box)return; const manage=!!(me&&effManage());
+    const addBtn=$("prize_add"); if(addBtn)addBtn.classList.toggle("hidden",!manage);
+    // offene Einträge merken, damit sie beim Neu-Rendern (z. B. durch Live-Sync) nicht zuklappen
+    const open=new Set(); box.querySelectorAll('details.prize[open]').forEach(d=>{ if(d.dataset.id)open.add(d.dataset.id); });
+    if(!prizes.length){ box.innerHTML='<div class="prizeempty">Noch keine Preise eingetragen.'+(manage?' Über „＋ Preis" den ersten anlegen.':'')+'</div>'; return; }
+    box.innerHTML=prizes.map(p=>{
+      const body=prizeSection("Einleitung",p.intro)+prizeSection("Regel für die Vergabe des Preises",p.rules)+prizeSection("Bewertung der Würfe",p.evaluation)
+        +(manage?'<div class="prizeadmin"><button class="btn sm" type="button" data-pedit="'+p.id+'">Bearbeiten</button><button class="btn warn sm" type="button" data-pdel="'+p.id+'">Löschen</button></div>':'');
+      return '<details class="prize" data-id="'+p.id+'"'+(open.has(String(p.id))?' open':'')+'>'
+        +'<summary><span class="chev">▶</span><span class="ptitle">'+esc(p.title||"(ohne Titel)")+'</span></summary>'
+        +'<div class="prizebody">'+(body||'<div class="prizesec"><div class="ptext" style="color:var(--muted)">Keine weitere Beschreibung hinterlegt.</div></div>')+'</div></details>';
+    }).join("");
+    box.querySelectorAll('[data-pedit]').forEach(b=>b.addEventListener("click",e=>{ e.preventDefault(); openPrizeEdit(Number(b.dataset.pedit)); }));
+    box.querySelectorAll('[data-pdel]').forEach(b=>b.addEventListener("click",e=>{ e.preventDefault(); const p=prizes.find(x=>x.id===Number(b.dataset.pdel));
+      if(confirm('Preis „'+(p?p.title:'')+'" wirklich löschen?')) opStruct({type:'removePrize',id:Number(b.dataset.pdel)}); }));
+  }
+  function openPrizeEdit(id){ if(!(me&&effManage()))return; const p=id!=null?prizes.find(x=>x.id===id):null; prizeEditId=id!=null?id:null;
+    $("pz_title").textContent=p?"Preis bearbeiten":"Neuer Preis"; $("pz_err").textContent="";
+    $("pz_name").value=p?p.title:""; $("pz_intro").value=p?p.intro:""; $("pz_rules").value=p?p.rules:""; $("pz_eval").value=p?p.evaluation:"";
+    $("prizedlg").classList.remove("hidden"); setTimeout(()=>$("pz_name").focus(),50);
+  }
+  function closePrizeEdit(){ $("prizedlg").classList.add("hidden"); prizeEditId=null; }
+  function savePrizeEdit(){ if(!(me&&effManage())){closePrizeEdit();return;}
+    $("pz_err").textContent="";
+    const title=$("pz_name").value.trim();
+    if(!title){ $("pz_err").textContent="Titel darf nicht leer sein."; return; }
+    const prize={ title, intro:$("pz_intro").value, rules:$("pz_rules").value, evaluation:$("pz_eval").value };
+    if(prizeEditId!=null) opStruct({type:'updatePrize',id:prizeEditId,prize});
+    else opStruct({type:'addPrize',prize});
+    closePrizeEdit(); toast("Gespeichert.");
+  }
+  $("prize_add").addEventListener("click",()=>openPrizeEdit(null));
+  $("pz_save").addEventListener("click",savePrizeEdit);
+  $("pz_cancel").addEventListener("click",closePrizeEdit);
+  $("prizedlg").addEventListener("click",e=>{ if(e.target===$("prizedlg"))closePrizeEdit(); });
+
   // CSV-Export (aktuelle Filterung)
   function dirCurrentList(){ const ql=($("dir_search").value||"").trim().toLowerCase(); const showInactive=$("dir_inactive").checked;
     return roster.slice().filter(r=>(showInactive||r.active!==false)&&dirMatch(r,ql)).sort((a,b)=>a.name.localeCompare(b.name)); }
