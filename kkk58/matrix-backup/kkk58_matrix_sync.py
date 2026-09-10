@@ -474,6 +474,10 @@ class MatrixSync:
                 self._outbox_attempts.pop(mid, None)
                 continue
             room = msg.get("roomId")
+            # Sentinel der Node-App für den zentralen Vereinsraum: die App kennt dessen ID nicht
+            # und legt "__club__" ab; hier durch den konfigurierten KKK_MATRIX_ROOM ersetzen.
+            if room in ("__club__", "@club"):
+                room = self.room_id or self.cfg.room
             body = msg.get("body")
             if not room or not body:
                 self._safe_remove(fpath)

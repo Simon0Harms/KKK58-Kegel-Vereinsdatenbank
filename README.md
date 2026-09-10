@@ -463,6 +463,46 @@ danach frei editierbar. Speicherung als `develop`/`seqDevelop` in `data/db.json`
 laufen über die Live-Sync-Operationen `addDevelop` / `updateDevelop` / `removeDevelop` und
 erscheinen sofort bei allen angemeldeten Mitgliedern.
 
+## Abstimmungen (Ja/Nein)
+
+Der Reiter **„Abstimmungen"** bietet einfache **Ja/Nein-Umfragen** – z. B. „Wer kommt mit zur
+Kegelfahrt?".
+
+- **Erstellen:** Jedes angemeldete Konto kann eine Abstimmung starten und dabei die **Laufzeit**
+  festlegen (1–4 Wochen als Vorgabe oder ein frei gewähltes **Enddatum**). Nach Ablauf sind keine
+  Stimmen mehr möglich.
+- **Abstimmen:** Jedes Konto hat **eine Stimme** (Ja/Nein), bis zum Ende **änderbar**.
+  Stimmberechtigt sind **alle Login-Konten**; die Einzelstimmen sind **offen sichtbar** (man sieht
+  namentlich, wer mit Ja, Nein oder noch gar nicht gestimmt hat) – bewusst so, damit man bei der
+  Kegelfahrt-Abfrage weiß, wer mitkommt.
+- **Beenden/Löschen:** Frühzeitig beenden oder löschen darf **der Ersteller** oder ein Konto mit
+  **Verwaltungsrecht** (Admin/Kassenwart/Mitglied).
+
+### Matrix-Ankündigung & wöchentliche Erinnerung
+
+- Beim **Erstellen** wird die Abstimmung im **zentralen Vereinsraum** angekündigt.
+- **Wöchentlich** erinnert der Server, solange die Abstimmung läuft und **noch nicht alle**
+  abgestimmt haben: einmal in den **Vereinsraum** (mit den noch offenen Namen) und zusätzlich
+  **privat** in den verknüpften Matrix-Raum jedes noch offenen Kontos.
+
+Die Zustellung läuft – wie die Login-Links – über den **Matrix-Sidecar** (Datei-Spool
+`data/matrix-outbox`); ohne laufenden Sidecar werden keine Matrix-Nachrichten verschickt, die
+Abstimmung selbst funktioniert aber weiter. Enthält eine Nachricht einen Link zur App, muss dafür
+`KKK_PUBLIC_URL` in der Node-Unit gesetzt sein (sonst wird der Link weggelassen).
+
+**Zielraum konfigurieren** – zwei Wege:
+
+1. **Sidecar kennt den Raum (empfohlen):** Die Node-App legt den Sentinel `__club__` ab, der
+   Sidecar ersetzt ihn beim Senden durch seinen `KKK_MATRIX_ROOM`. Kein zusätzlicher Wert in der
+   Node-Unit nötig – es genügt ein aktueller Sidecar (`kkk58_matrix_sync.py`).
+2. **Raum in der Node-App setzen:** Alternativ `KKK_CLUB_ROOM=!raumId:server` (oder
+   `#alias:server`) in der Node-Unit `kkk58.service` setzen; dann adressiert die App den Raum
+   direkt (funktioniert auch mit einem älteren Sidecar).
+
+Speicherung als `polls`/`seqPolls` in `data/db.json` (Stimmen je `userId`); Änderungen laufen über
+die Live-Sync-Operationen `addPoll` / `votePoll` / `closePoll` / `removePoll` und erscheinen sofort
+bei allen angemeldeten Mitgliedern.
+
 ## GnuCash-Export
 
 In der Kasse gibt es den Button **„⬇ GnuCash-Export (.gnucash)"**. Er ist für **alle

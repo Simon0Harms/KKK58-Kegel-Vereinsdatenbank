@@ -267,6 +267,26 @@
   .triptable td.dtext{white-space:pre-wrap;min-width:200px}
   .triptable td.dcount{text-align:center;font-variant-numeric:tabular-nums;font-weight:700}
   .triptable td.dcount .muted2{font-weight:400}
+  .polllist{display:flex;flex-direction:column;gap:12px}
+  .pollcard{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px}
+  .pollcard.closed{opacity:.85}
+  .pollcard .pq{font-size:1.08rem;font-weight:800;margin:0 0 3px;white-space:pre-wrap}
+  .pollcard .pmeta{color:var(--muted);font-size:.82rem;margin:0 0 10px}
+  .pollcard .pmeta .pstate{font-weight:700}
+  .pollcard .pstate.open{color:var(--pine-dark)} .pollcard .pstate.done{color:var(--muted)}
+  .pollvote{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px}
+  .pollvote .btn.vote{min-width:84px} .pollvote .btn.vote.sel-yes{background:#1f7a4d;border-color:#1f7a4d;color:#fff}
+  .pollvote .btn.vote.sel-no{background:#a23b3b;border-color:#a23b3b;color:#fff}
+  .pollvote .vhint{color:var(--muted);font-size:.82rem}
+  .pollbars{display:flex;flex-direction:column;gap:4px;margin:0 0 8px}
+  .pollbar{display:grid;grid-template-columns:64px 1fr 44px;align-items:center;gap:8px;font-size:.85rem}
+  .pollbar .pblabel{font-weight:700} .pollbar .pbtrack{background:var(--stripe);border-radius:6px;height:12px;overflow:hidden}
+  .pollbar .pbfill{height:100%;border-radius:6px} .pollbar .pbfill.yes{background:#2f9e69} .pollbar .pbfill.no{background:#c05656} .pollbar .pbfill.open{background:#c3ccd4}
+  .pollbar .pbnum{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+  .pollnames{display:flex;flex-wrap:wrap;gap:6px 10px;font-size:.82rem;color:var(--muted);margin:0 0 4px}
+  .pollnames b{color:var(--ink)} .pollnames .nm-open{color:var(--muted)}
+  .pollcard .pactions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .pollempty{color:var(--muted);padding:18px;text-align:center;border:1px dashed var(--line);border-radius:12px}
   .dirgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:6px}
   .dirgrid .dirfull{grid-column:1 / -1}
   .dirgrid .fld label{display:block;font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 4px}
@@ -393,6 +413,7 @@
       <button id="nav_prizes" type="button">Preise</button>
       <button id="nav_trips" type="button">Ausflüge</button>
       <button id="nav_develop" type="button">Chronik</button>
+      <button id="nav_polls" type="button">Abstimmungen</button>
       <button id="nav_cash" type="button" class="hidden">Kasse</button>
       <div class="btnrow" id="sheetBtns">
         <button id="btn_focus" type="button" title="Nur die Liste anzeigen (Menü ausblenden)">⛶ Nur Liste</button>
@@ -552,6 +573,18 @@
     <div id="developList"></div>
     <p class="foot" id="developFoot" style="text-align:left">Die Chronik ist für alle angemeldeten Mitglieder sichtbar. Anlegen, Bearbeiten und Löschen nur mit Verwaltungsrecht (Admin, Kassenwart, Mitglied).</p>
   </section>
+
+  <!-- ===== ABSTIMMUNGEN ===== -->
+  <section id="view_polls" class="hidden">
+    <div class="dirbar">
+      <span class="prizeintro">Ja/Nein-Abstimmungen des Vereins – z. B. „Wer kommt mit zur Kegelfahrt?".</span>
+      <span style="flex:1"></span>
+      <label class="chip" id="poll_closed_lbl" title="Auch bereits beendete Abstimmungen anzeigen"><input type="checkbox" id="poll_show_closed">Beendete zeigen</label>
+      <button class="btn prim sm" id="poll_add" type="button">＋ Neue Abstimmung</button>
+    </div>
+    <div id="pollList" class="polllist"></div>
+    <p class="foot" id="pollFoot" style="text-align:left">Jedes angemeldete Mitglied kann eine Abstimmung starten und mit Ja oder Nein antworten. Neue Abstimmungen werden im Matrix-Vereinsraum angekündigt; wöchentlich wird an alle erinnert, die noch nicht abgestimmt haben.</p>
+  </section>
 </div>
 
 <!-- VERZEICHNIS: Bearbeiten-Dialog -->
@@ -632,6 +665,32 @@
   </div>
 </div>
 
+<!-- ABSTIMMUNG: Erstellen-Dialog -->
+<div id="polldlg" class="ovl hidden">
+  <div class="login dirdlg">
+    <div class="eyebrow">Abstimmungen</div>
+    <h1>Neue Abstimmung</h1>
+    <div class="fld"><label>Frage</label><textarea id="pl_q" rows="2" maxlength="200" placeholder="z. B. Wer kommt mit zur Kegelfahrt?"></textarea></div>
+    <div class="dirgrid">
+      <div class="fld"><label>Laufzeit</label>
+        <select id="pl_dur">
+          <option value="7">1 Woche</option>
+          <option value="14" selected>2 Wochen</option>
+          <option value="21">3 Wochen</option>
+          <option value="28">4 Wochen</option>
+          <option value="custom">bis Datum …</option>
+        </select>
+      </div>
+      <div class="fld" id="pl_datewrap" style="display:none"><label>Enddatum</label><input id="pl_date" type="date"></div>
+    </div>
+    <div class="dderr err" id="pl_err"></div>
+    <div class="ddrow">
+      <button class="btn prim" id="pl_save" type="button">Abstimmung starten</button>
+      <button class="btn" id="pl_cancel" type="button">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
 <!-- KASSE: Buchungs-Dialog -->
 <div id="cashdlg" class="ovl hidden">
   <div class="login">
@@ -677,7 +736,7 @@
   const canManage=r=>r==="admin"||r==="kassenwart"||r==="mitglied";
   const canCash=r=>r==="admin"||r==="kassenwart";
   const roleLabel=r=>ROLE_LABEL[r]||r;
-  let me=null, state=null, roster=[], prizes=[], trips=[], develop=[], version=0, es=null, currentView="sheet", sortMode="arrival";
+  let me=null, state=null, roster=[], prizes=[], trips=[], develop=[], polls=[], version=0, es=null, currentView="sheet", sortMode="arrival";
   const pending=new Set();
   const rid=()=> (crypto.randomUUID? crypto.randomUUID() : String(Date.now())+Math.random());
   const $=id=>document.getElementById(id);
@@ -721,7 +780,7 @@
     $("adminPanel").hidden=!manage; $("nav_cash").classList.remove("hidden");
     const seg=$("rvSeg"); if(seg) seg.querySelectorAll("button").forEach(b=>b.classList.toggle("active", b.dataset.vr===eff));
     $("rvNote").textContent = viewRole ? "Nur Vorschau – deine echten Rechte bleiben Admin." : "";
-    renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); if(currentView==="archive") loadArchive(); if(currentView==="cash"&&cashData) renderCash(); }
+    renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderPolls(); if(currentView==="archive") loadArchive(); if(currentView==="cash"&&cashData) renderCash(); }
   function setViewRole(r){ if(!(me&&me.role==='admin'))return; viewRole = (r==='admin'||r===me.role) ? null : r; applyRoleUI(); }
   function showApp(){ $("view_invite").classList.add("hidden"); $("view_login").classList.add("hidden"); $("view_app").classList.remove("hidden");
     if(!(me&&me.role==='admin')) viewRole=null;
@@ -855,7 +914,7 @@
   $("pw_new2").addEventListener("keydown",e=>{if(e.key==='Enter')submitPw();});
 
   async function loadState(){ const r=await api('/state');
-    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); loadLog();
+    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; polls=r.data.polls||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderPolls(); loadLog();
       if(me&&me.mustChangePassword&&$("pwdlg").classList.contains("hidden")) openPwDialog(); }
     else if(r.status===401) showLogin(); }
   function resync(){ loadState(); }
@@ -871,6 +930,7 @@
     $("view_prizes").classList.toggle("hidden",v!=="prizes");
     $("view_trips").classList.toggle("hidden",v!=="trips");
     $("view_develop").classList.toggle("hidden",v!=="develop");
+    $("view_polls").classList.toggle("hidden",v!=="polls");
     $("sheetBtns").style.display = v==="sheet" ? "" : "none";
     $("nav_sheet").classList.toggle("active",v==="sheet");
     $("nav_archive").classList.toggle("active",v==="archive");
@@ -880,6 +940,7 @@
     $("nav_prizes").classList.toggle("active",v==="prizes");
     $("nav_trips").classList.toggle("active",v==="trips");
     $("nav_develop").classList.toggle("active",v==="develop");
+    $("nav_polls").classList.toggle("active",v==="polls");
     if(v==="archive") loadArchive();
     if(v==="stats") loadStats();
     if(v==="cash") loadCash();
@@ -887,6 +948,7 @@
     if(v==="prizes") renderPrizes();
     if(v==="trips") renderTrips();
     if(v==="develop") renderDevelop();
+    if(v==="polls") renderPolls();
   }
   // Fokus-Modus: nur die Liste zum Eintragen (Menü/Kopf ausgeblendet)
   function updateFocusMeta(){ const ev=($("f_event").value||"").trim(), dt=$("f_date").value||""; $("fbMeta").textContent=[ev,dt].filter(Boolean).join(" · "); }
@@ -899,6 +961,7 @@
   $("nav_prizes").addEventListener("click",()=>setView("prizes"));
   $("nav_trips").addEventListener("click",()=>setView("trips"));
   $("nav_develop").addEventListener("click",()=>setView("develop"));
+  $("nav_polls").addEventListener("click",()=>setView("polls"));
   $("rvSeg").addEventListener("click",e=>{ const b=e.target.closest("button[data-vr]"); if(b)setViewRole(b.dataset.vr); });
   $("btn_focus").addEventListener("click",()=>setFocus(true));
   $("fb_exit").addEventListener("click",()=>setFocus(false));
@@ -909,7 +972,7 @@
     es.onopen=()=>$("conn").classList.remove("off");
     es.onerror=()=>$("conn").classList.add("off");
     es.onmessage=ev=>{ let m; try{m=JSON.parse(ev.data);}catch(_){return;}
-      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; prizes=m.prizes||prizes; trips=m.trips||trips; develop=m.develop||develop; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); loadLog(); return; }
+      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; prizes=m.prizes||prizes; trips=m.trips||trips; develop=m.develop||develop; polls=m.polls||polls; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderPolls(); loadLog(); return; }
       applyRemote(m); }; }
   function applyRemote(m){
     if(typeof m.v!=='number')return;
@@ -953,6 +1016,8 @@
       case 'addDevelop': if(op.entry && !develop.some(d=>d.id===op.entry.id)) develop.push(op.entry); renderDevelop(); return;
       case 'updateDevelop': { const i=develop.findIndex(d=>d.id===op.id); if(i>=0 && op.entry) develop[i]=op.entry; renderDevelop(); return; }
       case 'removeDevelop': develop=develop.filter(d=>d.id!==op.id); renderDevelop(); return;
+      case 'addPoll': case 'votePoll': case 'closePoll': { if(op.poll){ const i=polls.findIndex(p=>p.id===op.poll.id); if(i>=0)polls[i]=op.poll; else polls.push(op.poll); } renderPolls(); return; }
+      case 'removePoll': polls=polls.filter(p=>p.id!==op.id); renderPolls(); return;
     }
     updateDerived();
   }
@@ -1384,6 +1449,61 @@
     const rows=developSorted().map(d=>[d.date,d.description,d.count==null?'':d.count].map(csvCell).join(';'));
     const csv='﻿'+[head.map(csvCell).join(';')].concat(rows).join('\r\n');
     dlBlob(csv,'text/csv;charset=utf-8','KKk58-Mitgliederentwicklung-'+new Date().toISOString().slice(0,10)+'.csv'); toast('CSV erstellt.'); });
+
+  // ---------- Abstimmungen (Ja/Nein) ----------
+  function pollDate(ms){ const d=new Date(ms); const z=n=>String(n).padStart(2,"0"); return z(d.getDate())+"."+z(d.getMonth()+1)+"."+d.getFullYear(); }
+  function myPollChoice(p){ if(!me)return null; const v=(p.voters||[]).find(x=>x.userId===me.id); return v?v.choice:null; }
+  // offene zuerst (nach Ablauf aufsteigend), dann beendete (zuletzt beendete zuerst)
+  function pollsSorted(){ return polls.slice().sort((a,b)=>{ if(a.closed!==b.closed)return a.closed?1:-1; return a.closed?(b.closesAt-a.closesAt):(a.closesAt-b.closesAt); }); }
+  function pollBar(label,cls,n,total){ const pct=total>0?Math.round(n/total*100):0;
+    return '<div class="pollbar"><span class="pblabel">'+label+'</span><span class="pbtrack"><span class="pbfill '+cls+'" style="width:'+pct+'%"></span></span><span class="pbnum">'+n+'</span></div>'; }
+  function pollCardHtml(p){
+    const mine=myPollChoice(p), total=p.counts.total, manage=!!(me&&effManage()), isCreator=!!(me&&p.createdBy===me.username);
+    const yesN=(p.voters||[]).filter(v=>v.choice==='yes').map(v=>esc(v.name));
+    const noN=(p.voters||[]).filter(v=>v.choice==='no').map(v=>esc(v.name));
+    const openN=(p.voters||[]).filter(v=>!v.choice).map(v=>esc(v.name));
+    let h='<div class="pollcard'+(p.closed?' closed':'')+'">';
+    h+='<div class="pq">'+esc(p.question)+'</div>';
+    h+='<div class="pmeta">von '+esc(p.createdByPerson||p.createdBy||'')+' · '+(p.closed?'<span class="pstate done">beendet am '+pollDate(p.closesAt)+'</span>':'<span class="pstate open">läuft bis '+pollDate(p.closesAt)+'</span>')+'</div>';
+    if(!p.closed){ h+='<div class="pollvote">'
+      +'<button class="btn vote'+(mine==='yes'?' sel-yes':'')+'" type="button" data-poll="'+p.id+'" data-vote="yes">Ja</button>'
+      +'<button class="btn vote'+(mine==='no'?' sel-no':'')+'" type="button" data-poll="'+p.id+'" data-vote="no">Nein</button>'
+      +'<span class="vhint">'+(mine?('Deine Stimme: '+(mine==='yes'?'Ja':'Nein')+' – änderbar bis Ende'):'Du hast noch nicht abgestimmt')+'</span></div>'; }
+    h+='<div class="pollbars">'+pollBar('Ja','yes',p.counts.yes,total)+pollBar('Nein','no',p.counts.no,total)+pollBar('Offen','open',p.counts.open,total)+'</div>';
+    if(yesN.length) h+='<div class="pollnames"><b>Ja:</b>&nbsp;'+yesN.join(', ')+'</div>';
+    if(noN.length) h+='<div class="pollnames"><b>Nein:</b>&nbsp;'+noN.join(', ')+'</div>';
+    if(openN.length) h+='<div class="pollnames nm-open"><b>Offen:</b>&nbsp;'+openN.join(', ')+'</div>';
+    if(isCreator||manage){ h+='<div class="pactions">';
+      if(!p.closed) h+='<button class="btn sm" type="button" data-pclose="'+p.id+'">Jetzt beenden</button>';
+      h+='<button class="btn warn sm" type="button" data-pdel="'+p.id+'">Löschen</button></div>'; }
+    h+='</div>'; return h;
+  }
+  function renderPolls(){ const box=$("pollList"); if(!box)return;
+    const showClosed=$("poll_show_closed")&&$("poll_show_closed").checked;
+    const list=pollsSorted().filter(p=>showClosed||!p.closed);
+    if(!list.length){ box.innerHTML='<div class="pollempty">'+(polls.length&&!showClosed?'Keine offenen Abstimmungen. Über „Beendete zeigen" die alten einblenden.':'Noch keine Abstimmungen. Über „＋ Neue Abstimmung" die erste starten.')+'</div>'; return; }
+    box.innerHTML=list.map(pollCardHtml).join("");
+    box.querySelectorAll('[data-vote]').forEach(b=>b.addEventListener("click",()=>opStruct({type:'votePoll',id:Number(b.dataset.poll),choice:b.dataset.vote})));
+    box.querySelectorAll('[data-pclose]').forEach(b=>b.addEventListener("click",()=>{ const p=polls.find(x=>x.id===Number(b.dataset.pclose)); if(confirm('Abstimmung „'+(p?p.question:'')+'" jetzt beenden? Danach sind keine Stimmen mehr möglich.')) opStruct({type:'closePoll',id:Number(b.dataset.pclose)}); }));
+    box.querySelectorAll('[data-pdel]').forEach(b=>b.addEventListener("click",()=>{ const p=polls.find(x=>x.id===Number(b.dataset.pdel)); if(confirm('Abstimmung „'+(p?p.question:'')+'" wirklich löschen? Alle Stimmen gehen verloren.')) opStruct({type:'removePoll',id:Number(b.dataset.pdel)}); }));
+  }
+  function openPollCreate(){ if(!me)return; $("pl_q").value=""; $("pl_dur").value="14"; $("pl_datewrap").style.display="none";
+    const d=new Date(Date.now()+14*86400000); $("pl_date").value=d.toISOString().slice(0,10); $("pl_date").min=new Date().toISOString().slice(0,10);
+    $("pl_err").textContent=""; $("polldlg").classList.remove("hidden"); setTimeout(()=>$("pl_q").focus(),50); }
+  function closePollCreate(){ $("polldlg").classList.add("hidden"); }
+  function savePollCreate(){ $("pl_err").textContent="";
+    const q=$("pl_q").value.trim(); if(!q){ $("pl_err").textContent="Bitte eine Frage eingeben."; return; }
+    const dur=$("pl_dur").value; const op={type:'addPoll',question:q};
+    if(dur==="custom"){ const dt=$("pl_date").value; if(!/^\d{4}-\d{2}-\d{2}$/.test(dt)){ $("pl_err").textContent="Bitte ein Enddatum wählen."; return; } op.endDate=dt; }
+    else op.days=Number(dur);
+    opStruct(op); closePollCreate(); toast("Abstimmung gestartet.");
+  }
+  $("poll_add").addEventListener("click",openPollCreate);
+  $("poll_show_closed").addEventListener("change",renderPolls);
+  $("pl_dur").addEventListener("change",()=>{ $("pl_datewrap").style.display=$("pl_dur").value==="custom"?"":"none"; });
+  $("pl_save").addEventListener("click",savePollCreate);
+  $("pl_cancel").addEventListener("click",closePollCreate);
+  $("polldlg").addEventListener("click",e=>{ if(e.target===$("polldlg"))closePollCreate(); });
 
   // CSV-Export (aktuelle Filterung)
   function dirCurrentList(){ const ql=($("dir_search").value||"").trim().toLowerCase(); const showInactive=$("dir_inactive").checked;

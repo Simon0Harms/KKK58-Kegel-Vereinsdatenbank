@@ -27,6 +27,11 @@ const SECRET_FILE = path.join(DATA_DIR, '.session_secret');
 const MATRIX_OUTBOX_DIR = process.env.KKK_OUTBOX_DIR || path.join(DATA_DIR, 'matrix-outbox');
 // Öffentliche Basis-URL (für absolute Login-Links in den Matrix-Raum). Leer => aus Request ableiten.
 const PUBLIC_URL = String(process.env.KKK_PUBLIC_URL || '').replace(/\/+$/, '');
+// Zentraler Vereinsraum für Abstimmungs-Ankündigungen/-Erinnerungen. Leer lassen, wenn der
+// Sidecar den Raum kennt: dann wird der Sentinel '__club__' abgelegt und der Sidecar ersetzt
+// ihn durch seinen KKK_MATRIX_ROOM. Alternativ hier direkt eine Raum-ID (!id:server) setzen.
+const CLUB_ROOM_ENV = String(process.env.KKK_CLUB_ROOM || '').trim();
+const POLL_REMINDER_INTERVAL = 7 * 864e5; // wöchentlich an offene Stimmen erinnern
 const MAX = 180;
 const MATRIX_CODE_TTL = 10 * 60 * 1000; // Verknüpfungscode: 10 Minuten gültig
 const MATRIX_MAGIC_TTL = 5 * 60 * 1000;  // Matrix-Login-Link: 5 Minuten gültig
@@ -45,7 +50,7 @@ function emptySheet() {
   return { event: '', date: '', lanes: { bohle: true, schere: false }, priceNK: 1, pricePump: 0.1,
     pumpen: '', note: '', seq: 0, players: [], updatedBy: '', updatedAt: 0 };
 }
-let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, develop: [], seqDevelop: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
+let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, develop: [], seqDevelop: 0, polls: [], seqPolls: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
 const LOG_MAX = 400;
 
 function cint(v, mn, mx, fb) { let n = Math.round(Number(v)); if (!isFinite(n)) return fb; return Math.min(mx, Math.max(mn, n)); }
@@ -227,6 +232,8 @@ function loadDb() {
     db.seqDevelop = j.seqDevelop || db.develop.reduce((m, d) => Math.max(m, d.id), 0);
     // Migration älterer Datenbanken ohne Chronik: Mitgliederentwicklung als Startdatensatz anlegen
     if (!Object.prototype.hasOwnProperty.call(j, 'develop')) seedDevelop();
+    db.polls = Array.isArray(j.polls) ? j.polls.map(normPoll).filter(Boolean) : [];
+    db.seqPolls = j.seqPolls || db.polls.reduce((m, p) => Math.max(m, p.id), 0);
     db.log = Array.isArray(j.log) ? j.log.slice(-LOG_MAX) : [];
     const nowL = Date.now();
     db.invites = Array.isArray(j.invites) ? j.invites.filter(x => x && !x.used && x.expires > nowL) : [];
@@ -357,6 +364,65 @@ function publicBase(req) {
 const matrixRate = new Map();
 function mRateHit(key, minMs) { const now = Date.now(); const t = matrixRate.get(key) || 0; if (now - t < minMs) return true; matrixRate.set(key, now); return false; }
 function personNameOf(user) { if (!user || user.rosterId == null) return null; const r = db.roster.find(x => x.id === user.rosterId); return r ? r.name : null; }
+
+// ---------- Abstimmungen (Ja/Nein) ----------
+// Ein Poll: Frage, Ersteller, Ablaufzeitpunkt (der Ersteller legt die Laufzeit fest),
+// Stimmen je Login-Konto (userId -> 'yes'|'no'). Stimmberechtigt sind alle Login-Konten;
+// die Einzelstimmen sind offen sichtbar (passend zur Kegelfahrt-Abfrage).
+const POLL_Q_MAX = 200;
+function normPollChoice(v) { return v === 'yes' || v === 'no' ? v : null; }
+function pollIsClosed(p) { return Date.now() > p.closesAt; }
+// Ablauf aus einem Enddatum (JJJJ-MM-TT) = Ende dieses Tages (lokale Zeit) in ms
+function pollClosesFromDate(dateStr) { if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ''))) return null; const [y, m, d] = dateStr.split('-').map(Number); const dt = new Date(y, m - 1, d, 23, 59, 59, 999); return isNaN(dt.getTime()) ? null : dt.getTime(); }
+function normPoll(src) {
+  if (!src || src.id == null) return null;
+  const closesAt = Number(src.closesAt); if (!Number.isFinite(closesAt)) return null;
+  const votes = {};
+  if (src.votes && typeof src.votes === 'object') for (const k of Object.keys(src.votes)) { const c = normPollChoice(src.votes[k]); if (c) votes[String(k)] = c; }
+  return { id: Number(src.id), question: String(src.question || '').slice(0, POLL_Q_MAX), createdBy: String(src.createdBy || ''),
+    createdByPerson: src.createdByPerson != null ? String(src.createdByPerson) : null, createdAt: Number(src.createdAt) || 0,
+    closesAt, votes, lastReminderAt: Number(src.lastReminderAt) || 0 };
+}
+// Öffentliche Sicht eines Polls für die Clients: Zählstand + namentliche Stimmen aller Konten.
+function pollView(p) {
+  const voters = db.users.map(u => ({ userId: u.id, name: personNameOf(u) || u.username, choice: p.votes[String(u.id)] || null }));
+  let yes = 0, no = 0, open = 0;
+  voters.forEach(v => { if (v.choice === 'yes') yes++; else if (v.choice === 'no') no++; else open++; });
+  return { id: p.id, question: p.question, createdBy: p.createdBy, createdByPerson: p.createdByPerson, createdAt: p.createdAt,
+    closesAt: p.closesAt, closed: pollIsClosed(p), counts: { yes, no, open, total: voters.length }, voters };
+}
+function fmtDateMs(ms) { const d = new Date(ms); const z = n => String(n).padStart(2, '0'); return z(d.getDate()) + '.' + z(d.getMonth() + 1) + '.' + d.getFullYear(); }
+function pollLink() { return PUBLIC_URL ? PUBLIC_URL + '/' : null; }
+// Zielraum für die Vereins-Ankündigung: entweder eine konfigurierte Raum-ID oder der Sentinel,
+// den der Sidecar durch seinen KKK_MATRIX_ROOM ersetzt.
+function clubRoom() { return validRoom(CLUB_ROOM_ENV) || '__club__'; }
+function announcePoll(p) {
+  const link = pollLink();
+  enqueueMatrix(clubRoom(), '🎳 KKk58 – Neue Abstimmung\n„' + p.question + '"\nLäuft bis ' + fmtDateMs(p.closesAt) + '. Bitte mit Ja oder Nein abstimmen.' + (link ? ('\n' + link) : ''));
+}
+function pollNonVoters(p) { return db.users.filter(u => !(String(u.id) in p.votes)); }
+// Wöchentliche Erinnerung an offene Abstimmungen: in den Vereinsraum (mit offenen Namen)
+// und zusätzlich privat in den verknüpften Raum jedes noch offenen Kontos.
+function sendPollReminders() {
+  const now = Date.now(); let changed = false;
+  for (const p of db.polls) {
+    if (pollIsClosed(p)) continue;
+    const base = p.lastReminderAt || p.createdAt || 0;
+    if (now - base < POLL_REMINDER_INTERVAL) continue;
+    const missing = pollNonVoters(p);
+    if (missing.length === 0) continue;
+    const link = pollLink();
+    const names = missing.map(u => personNameOf(u) || u.username);
+    enqueueMatrix(clubRoom(), '🎳 KKk58 – Erinnerung Abstimmung\n„' + p.question + '" (läuft bis ' + fmtDateMs(p.closesAt) + ')\nEs fehlen noch: ' + names.join(', ') + (link ? ('\n' + link) : ''));
+    for (const u of missing) {
+      if (u.matrix && u.matrix.verified && u.matrix.roomId) {
+        enqueueMatrix(u.matrix.roomId, '🎳 KKk58 – Erinnerung\nDu hast noch nicht abgestimmt: „' + p.question + '" (bis ' + fmtDateMs(p.closesAt) + ').' + (link ? ('\nBitte Ja oder Nein abgeben: ' + link) : ''));
+      }
+    }
+    p.lastReminderAt = now; changed = true;
+  }
+  if (changed) flushDb();
+}
 function labelKey(k) { return k === 'c9' ? '9' : k === 'cK' ? 'Kränze' : k === 'cP' ? 'Pumpen' : k; }
 function pNameById(id) { const p = db.sheet.players.find(x => x.id === id); return p ? (p.name || '#' + id) : '#' + id; }
 function describeOp(op, ctx) {
@@ -390,6 +456,10 @@ function describeOp(op, ctx) {
     case 'addDevelop': return 'Chronik: Eintrag angelegt (' + (op.entry && op.entry.date ? op.entry.date : 'ohne Datum') + ')';
     case 'updateDevelop': return 'Chronik: Eintrag bearbeitet (' + (op.entry && op.entry.date ? op.entry.date : 'ohne Datum') + ')';
     case 'removeDevelop': return 'Chronik: Eintrag gelöscht';
+    case 'addPoll': return 'Abstimmung erstellt: ' + (op.poll ? op.poll.question : '');
+    case 'votePoll': return 'Abgestimmt: ' + (op.poll ? op.poll.question : '') + ' (' + (op.choice === 'yes' ? 'Ja' : 'Nein') + ')';
+    case 'closePoll': return 'Abstimmung beendet: ' + (op.poll ? op.poll.question : '');
+    case 'removePoll': return 'Abstimmung gelöscht';
     default: return op.type;
   }
 }
@@ -858,6 +928,40 @@ function applyOp(op, user) {
       if (db.develop.length === b) return null;
       return { type: 'removeDevelop', id: Number(op.id) };
     }
+    // ----- Abstimmungen -----
+    // Erstellen und Abstimmen darf jedes angemeldete Konto; frühzeitig beenden/löschen
+    // nur der Ersteller oder ein Konto mit Verwaltungsrecht.
+    case 'addPoll': {
+      const q = String(op.question || '').trim().slice(0, POLL_Q_MAX); if (!q) return null;
+      let closesAt = null;
+      if (op.closesAt != null && Number.isFinite(Number(op.closesAt))) closesAt = Number(op.closesAt);
+      else if (op.endDate) closesAt = pollClosesFromDate(op.endDate);
+      else if (op.days != null) { const d = cint(op.days, 1, 3650, 0); if (d > 0) { const dt = new Date(); dt.setHours(23, 59, 59, 999); closesAt = dt.getTime() + (d - 1) * 864e5; } }
+      if (!closesAt || closesAt <= Date.now()) return null;
+      const p = { id: ++db.seqPolls, question: q, createdBy: user.username, createdByPerson: personNameOf(user), createdAt: Date.now(), closesAt, votes: {}, lastReminderAt: 0 };
+      db.polls.push(p);
+      announcePoll(p);
+      return { type: 'addPoll', poll: pollView(p) };
+    }
+    case 'votePoll': {
+      const p = db.polls.find(x => x.id === Number(op.id)); if (!p) return null;
+      if (pollIsClosed(p)) return null;
+      const c = normPollChoice(op.choice); if (!c) return null;
+      p.votes[String(user.id)] = c;
+      return { type: 'votePoll', poll: pollView(p), choice: c };
+    }
+    case 'closePoll': {
+      const p = db.polls.find(x => x.id === Number(op.id)); if (!p) return null;
+      if (!(user.username === p.createdBy || canManage(user.role))) return null;
+      if (!pollIsClosed(p)) p.closesAt = Date.now();
+      return { type: 'closePoll', poll: pollView(p) };
+    }
+    case 'removePoll': {
+      const p = db.polls.find(x => x.id === Number(op.id)); if (!p) return null;
+      if (!(user.username === p.createdBy || canManage(user.role))) return null;
+      db.polls = db.polls.filter(x => x.id !== p.id);
+      return { type: 'removePoll', id: p.id };
+    }
     default: return null;
   }
 }
@@ -1043,7 +1147,7 @@ function handle(req, res) {
     catch (e) { return send(res, 400, { error: 'Daten zu lang für QR' }); }
   }
   if (api === '/logout' && req.method === 'POST') { clearSessionCookie(res); return send(res, 200, { ok: true }); }
-  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, develop: db.develop, me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
+  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, develop: db.develop, polls: db.polls.map(pollView), me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
   if (api === '/roster' && req.method === 'GET') return send(res, 200, { roster: db.roster });
   if (api === '/archive' && req.method === 'GET') return send(res, 200, { archive: db.archive.map(archiveMeta).sort((a, b) => b.savedAt - a.savedAt) });
   if (api === '/export' && req.method === 'GET') {
@@ -1069,7 +1173,7 @@ function handle(req, res) {
   if (api === '/events' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.write('retry: 3000\n\n');
-    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, develop: db.develop }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, develop: db.develop, polls: db.polls.map(pollView) }) + '\n\n');
     const c = { res, uid: me.id }; clients.add(c); req.on('close', () => clients.delete(c)); return;
   }
 
@@ -1269,5 +1373,9 @@ function bootstrapAdmin() {
 loadDb(); loadIndex(); bootstrapAdmin();
 const server = http.createServer((req, res) => { try { handle(req, res); } catch (e) { console.error(e); try { send(res, 500, { error: 'server error' }); } catch (_) {} } });
 server.listen(PORT, BIND, () => console.log('KKk58 läuft auf http://' + BIND + ':' + PORT + (BASE || '/')));
+// Wöchentliche Erinnerung an offene Abstimmungen: alle 6 h prüfen (feuert je Poll höchstens
+// einmal pro Woche), plus einmal kurz nach dem Start.
+setInterval(sendPollReminders, 6 * 3600 * 1000).unref();
+setTimeout(sendPollReminders, 60 * 1000).unref();
 function shutdown() { flushDb(); process.exit(0); }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
