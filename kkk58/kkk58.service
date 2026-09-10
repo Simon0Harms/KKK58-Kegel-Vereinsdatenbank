@@ -22,6 +22,12 @@ Environment=BIND=0.0.0.0
 Environment=BASE_PATH=/kkk58
 Environment=DATA_DIR=/opt/kkk58/data
 Environment=COOKIE_SECURE=true
+# Öffentliche Basis-URL – nötig für absolute Login-Links beim Matrix-Login.
+# Ohne diese Variable wird die URL aus den X-Forwarded-*-Headern von NPMplus abgeleitet.
+Environment=KKK_PUBLIC_URL=https://nas.example.net/kkk58
+# Spool-Verzeichnis für Matrix-Login-Nachrichten (muss mit dem Sidecar übereinstimmen).
+# Standard: <DATA_DIR>/matrix-outbox – liegt bereits unter ReadWritePaths.
+# Environment=KKK_OUTBOX_DIR=/opt/kkk58/data/matrix-outbox
 # Optional beim allerersten Start (sonst wird ein Zufallspasswort erzeugt
 # und in /opt/kkk58/data/INITIAL-ADMIN.txt geschrieben):
 # Environment=KKK_ADMIN_USER=admin

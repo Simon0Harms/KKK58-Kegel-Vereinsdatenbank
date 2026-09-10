@@ -67,6 +67,8 @@ cat /opt/kkk58/data/INITIAL-ADMIN.txt
 | `COOKIE_SECURE`  | `true`         | Session-Cookie nur über HTTPS (hinter NPM korrekt) |
 | `SESSION_SECRET` | *(auto)*       | Wird sonst automatisch erzeugt & in `data/.session_secret` gespeichert |
 | `KKK_ADMIN_USER` / `KKK_ADMIN_PASS` | – | Nur beim allerersten Start relevant |
+| `KKK_PUBLIC_URL` | *(aus Request)* | Öffentliche Basis-URL für absolute **Matrix-Login-Links** (z. B. `https://nas.example.net/kkk58`). Ohne die Variable aus `X-Forwarded-*` abgeleitet. |
+| `KKK_OUTBOX_DIR` | `<DATA_DIR>/matrix-outbox` | Spool für Matrix-Login-Nachrichten (Codes/Login-Links); muss mit dem Sidecar übereinstimmen. |
 
 **Wichtig – `BIND` (dieses Setup: NPMplus in separatem LXC):**
 - Die App-LXC und der NPM-LXC sind getrennt → `BIND=0.0.0.0` (Default in der
@@ -489,3 +491,36 @@ Im Ordner `matrix-backup/` liegt ein optionaler, **separater Python-Dienst**
 Änderungen ein **Ende-zu-Ende-verschlüsseltes Backup** von `db.json` hochlädt – nur
 für die Raummitglieder lesbar. Er liest `data/db.json` nur und lässt die
 abhängigkeitsfreie Node-App unverändert. Einrichtung siehe `matrix-backup/README.md`.
+
+## Matrix-Login (Anmeldung per Login-Link)
+
+Wer den Sidecar betreibt, kann sich **statt per Passwort** über einen Login-Link
+anmelden, den der KKk58-Bot in einen persönlichen Matrix-Chat schickt.
+
+**Einrichten (je Mitglied, einmalig):**
+
+1. Im Matrix-Client einen **eigenen 1:1-Raum mit dem KKk58-Bot** starten (den Bot
+   einladen). Der Sidecar nimmt die Einladung automatisch an.
+2. In der App **oben auf den eigenen Namen** klicken → **Matrix-Login**.
+3. Die **Raum-ID** dieses Chats eintragen (beginnt mit `!`, ein Alias mit `#` geht
+   auch) und **„Bestätigungscode senden"** drücken.
+4. Der Bot schickt einen **6-stelligen Code** in den Chat; diesen in der App eingeben.
+   Das beweist, dass der Raum wirklich dir gehört → Verknüpfung aktiv.
+
+**Anmelden:** Auf dem Login-Screen **„Kein Passwort? Login-Link per Matrix anfordern"**
+wählen, Benutzernamen eingeben. Der Bot schickt einen **5 Minuten gültigen, einmal
+verwendbaren** Login-Link in den verknüpften Chat.
+
+**Technik/Sicherheit:**
+
+- Node-App und Sidecar tauschen die Nachrichten über einen **Datei-Spool**
+  (`KKK_OUTBOX_DIR`, Standard `data/matrix-outbox`) aus; die Node-App bleibt
+  abhängigkeitsfrei, der Sidecar sendet **verschlüsselt**.
+- Codes (10 min) und Login-Links (5 min) sind kurzlebig und einmal einlösbar; der
+  Verknüpfungscode wird nur **gehasht** in `db.json` gehalten (`matrixPending`).
+- Die Login-Anforderung antwortet **immer generisch** – kein Rückschluss, ob ein Konto
+  existiert oder verknüpft ist.
+- Für absolute Login-Links `KKK_PUBLIC_URL` setzen (siehe Abschnitt 2).
+- Datenmodell (Ergänzung in `data/db.json`): pro Konto `matrix` (`{ roomId, verified }`)
+  bzw. `matrixPending`; Liste `magic` für offene Login-Tokens. Alle drei werden aus dem
+  Matrix-Backup entfernt (`sanitize_db`).

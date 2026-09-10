@@ -27,7 +27,7 @@ import time
 from datetime import datetime
 
 try:
-    from nio import AsyncClient, AsyncClientConfig, LoginResponse
+    from nio import AsyncClient, AsyncClientConfig, LoginResponse, RoomSendResponse
 except ImportError:
     sys.stderr.write(
         "Fehlt: matrix-nio mit E2EE. Bitte installieren:\n"
@@ -96,6 +96,11 @@ class Config:
         self.password = env("KKK_MATRIX_PASSWORD")                      # nur beim Erststart nötig
         self.room = env("KKK_MATRIX_ROOM", required=True)              # !id:server  oder  #alias:server
         self.db_file = env("KKK_DB_FILE", "/opt/kkk58/data/db.json")
+        # Outbox-Spool: von der Node-App abgelegte Sende-Aufträge (Codes/Login-Links).
+        # Standard: <db-Verzeichnis>/matrix-outbox
+        self.outbox_dir = env("KKK_OUTBOX_DIR", os.path.join(os.path.dirname(self.db_file) or ".", "matrix-outbox"))
+        self.outbox_ttl = int(env("KKK_OUTBOX_TTL", "900"))            # Aufträge älter als X Sek. verwerfen (Codes/Links sind dann ohnehin abgelaufen)
+        self.outbox_max_attempts = int(env("KKK_OUTBOX_MAX_ATTEMPTS", "5"))
         self.store_path = env("KKK_MATRIX_STORE", "/opt/kkk58/matrix-store")
         self.state_file = env("KKK_MATRIX_STATE", "/opt/kkk58/matrix-store/sidecar-state.json")
         self.poll_seconds = int(env("KKK_POLL_SECONDS", "15"))
@@ -241,11 +246,13 @@ def sanitize_db(db):
         sanitized = []
         for u in users:
             if isinstance(u, dict):
-                u = {k: v for k, v in u.items() if k not in ("hash", "salt")}
+                # Zugangsdaten und laufende Matrix-Verknüpfungscodes entfernen
+                u = {k: v for k, v in u.items() if k not in ("hash", "salt", "matrixPending")}
             sanitized.append(u)
         clean["users"] = sanitized
-    # Einladungen enthalten Einmal-Login-Tokens -> komplett weglassen
+    # Einladungen und Matrix-Login-Tokens sind login-fähig -> komplett weglassen
     clean.pop("invites", None)
+    clean.pop("magic", None)
     return clean
 
 
@@ -269,6 +276,10 @@ def make_backup_bytes(db_path):
 # ---------------------------------------------------------------------------
 # Matrix-Integration
 # ---------------------------------------------------------------------------
+class _PlaintextRefused(Exception):
+    """Senden abgelehnt, weil der Zielraum nicht verschlüsselt ist."""
+
+
 class MatrixSync:
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -277,6 +288,7 @@ class MatrixSync:
         self.room_id = None
         self.last_backup = self.state.get("last_backup", 0)
         self._stop = False
+        self._outbox_attempts = {}  # id -> Anzahl Fehlversuche (nur im Speicher)
 
     def log(self, *a):
         print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), *a, flush=True)
@@ -388,8 +400,102 @@ class MatrixSync:
             await self.client.sync(timeout=0)
             if self.client.should_upload_keys:
                 await self.client.keys_upload()
+            await self._join_invites()
         except Exception as e:
             self.log("Sync-Hinweis (fahre fort):", repr(e))
+
+    async def _join_invites(self):
+        """Offene Raum-Einladungen automatisch annehmen – so kann ein Mitglied
+        einen 1:1-Chat mit dem Bot starten, den der Sidecar zum Senden nutzt."""
+        try:
+            invited = list(getattr(self.client, "invited_rooms", {}).keys())
+        except Exception:
+            invited = []
+        for rid in invited:
+            try:
+                await self.client.join(rid)
+                self.log("Einladung angenommen (Raum beigetreten):", rid)
+            except Exception as e:
+                self.log("Beitritt fehlgeschlagen:", rid, repr(e))
+
+    @staticmethod
+    def _safe_remove(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    async def _send_to_room(self, room, body):
+        """Textnachricht in einen beliebigen Raum senden (Alias auflösen, ggf. beitreten).
+        Bei aktivierter Verschlüsselungspflicht wird NICHT in unverschlüsselte Räume gesendet."""
+        rid = room
+        if isinstance(rid, str) and rid.startswith("#"):
+            r = await self.client.room_resolve_alias(rid)
+            rid = getattr(r, "room_id", None) or rid
+        if rid not in self.client.rooms:
+            await self.client.join(rid)
+            await self.client.sync(timeout=0)
+        enc = rid in self.client.rooms and self.client.rooms[rid].encrypted
+        if self.cfg.require_encryption and not enc:
+            raise _PlaintextRefused(rid)
+        resp = await self.client.room_send(
+            rid, "m.room.message",
+            {"msgtype": "m.text", "body": body},
+            ignore_unverified_devices=True,
+        )
+        if not isinstance(resp, RoomSendResponse):
+            raise RuntimeError("room_send: " + repr(resp))
+
+    async def process_outbox(self):
+        """Von der Node-App abgelegte Sende-Aufträge abarbeiten (Codes/Login-Links).
+        Ein Auftrag = eine JSON-Datei; nach erfolgreichem Senden wird sie gelöscht."""
+        try:
+            names = [n for n in os.listdir(self.cfg.outbox_dir)
+                     if n.endswith(".json") and not n.startswith(".")]
+        except OSError:
+            return
+        if not names:
+            return
+        names.sort()
+        await self._refresh_keys()
+        for name in names:
+            fpath = os.path.join(self.cfg.outbox_dir, name)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    msg = json.load(f)
+            except (OSError, ValueError):
+                self._safe_remove(fpath)
+                continue
+            mid = str(msg.get("id") or name)
+            age = time.time() - (msg.get("createdAt", 0) / 1000)
+            if age > self.cfg.outbox_ttl:
+                self.log("Outbox: Auftrag zu alt, verworfen:", name)
+                self._safe_remove(fpath)
+                self._outbox_attempts.pop(mid, None)
+                continue
+            room = msg.get("roomId")
+            body = msg.get("body")
+            if not room or not body:
+                self._safe_remove(fpath)
+                continue
+            try:
+                await self._send_to_room(room, body)
+                self._safe_remove(fpath)
+                self._outbox_attempts.pop(mid, None)
+                self.log("Outbox: gesendet an", room)
+            except _PlaintextRefused:
+                self.log("Outbox: Raum", room,
+                         "ist NICHT verschlüsselt – Nachricht NICHT gesendet (KKK_REQUIRE_ENCRYPTION=1). Auftrag verworfen.")
+                self._safe_remove(fpath)
+                self._outbox_attempts.pop(mid, None)
+            except Exception as e:
+                n = self._outbox_attempts.get(mid, 0) + 1
+                self._outbox_attempts[mid] = n
+                self.log("Outbox: Senden fehlgeschlagen (Versuch %d) an %s: %s" % (n, room, repr(e)))
+                if n >= self.cfg.outbox_max_attempts:
+                    self.log("Outbox: Auftrag nach zu vielen Versuchen aufgegeben:", name)
+                    self._safe_remove(fpath)
+                    self._outbox_attempts.pop(mid, None)
 
     async def process_change(self, force_backup=False):
         try:
@@ -432,11 +538,18 @@ class MatrixSync:
         # wird dabei nicht nachgepostet – nur ab jetzt entstehende Änderungen).
         await self.process_change(force_backup=True)
         try:
+            os.makedirs(self.cfg.outbox_dir, exist_ok=True)
+        except OSError:
+            pass
+        await self.process_outbox()
+        try:
             last_mtime = os.path.getmtime(self.cfg.db_file)
         except OSError:
             pass
         while not self._stop:
             await asyncio.sleep(self.cfg.poll_seconds)
+            # Sende-Aufträge (Codes/Login-Links) zeitnah abarbeiten
+            await self.process_outbox()
             try:
                 m = os.path.getmtime(self.cfg.db_file)
             except OSError:

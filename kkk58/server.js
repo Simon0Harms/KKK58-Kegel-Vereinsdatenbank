@@ -22,9 +22,17 @@ const COOKIE_SECURE = String(process.env.COOKIE_SECURE || 'true') !== 'false';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const SECRET_FILE = path.join(DATA_DIR, '.session_secret');
+// Spool-Verzeichnis für den Matrix-Sidecar: die Node-App legt hier Sende-Aufträge
+// (Code-/Login-Link-Nachrichten) ab, der Sidecar sendet sie verschlüsselt und löscht die Datei.
+const MATRIX_OUTBOX_DIR = process.env.KKK_OUTBOX_DIR || path.join(DATA_DIR, 'matrix-outbox');
+// Öffentliche Basis-URL (für absolute Login-Links in den Matrix-Raum). Leer => aus Request ableiten.
+const PUBLIC_URL = String(process.env.KKK_PUBLIC_URL || '').replace(/\/+$/, '');
 const MAX = 180;
+const MATRIX_CODE_TTL = 10 * 60 * 1000; // Verknüpfungscode: 10 Minuten gültig
+const MATRIX_MAGIC_TTL = 5 * 60 * 1000;  // Matrix-Login-Link: 5 Minuten gültig
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
+try { fs.mkdirSync(MATRIX_OUTBOX_DIR, { recursive: true, mode: 0o700 }); } catch (_) {}
 
 let SECRET = process.env.SESSION_SECRET || '';
 if (!SECRET) {
@@ -37,7 +45,7 @@ function emptySheet() {
   return { event: '', date: '', lanes: { bohle: true, schere: false }, priceNK: 1, pricePump: 0.1,
     pumpen: '', note: '', seq: 0, players: [], updatedBy: '', updatedAt: 0 };
 }
-let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, log: [], invites: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
+let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
 const LOG_MAX = 400;
 
 function cint(v, mn, mx, fb) { let n = Math.round(Number(v)); if (!isFinite(n)) return fb; return Math.min(mx, Math.max(mn, n)); }
@@ -54,6 +62,9 @@ function loadDb() {
       rosterId: (u.rosterId != null ? Number(u.rosterId) : null),
       role: u.role === 'admin' ? 'admin' : (ALL_ROLES.indexOf(u.role) !== -1 ? u.role : 'beschraenkt') // Alt-Rolle "member" -> "beschraenkt" (Rechte bleiben gleich)
     })) : [];
+    // Abgelaufene Matrix-Verknüpfungscodes verwerfen (Matrix-Verknüpfung selbst bleibt erhalten)
+    const nowP = Date.now();
+    db.users.forEach(u => { if (u.matrixPending && !(u.matrixPending.expires > nowP)) delete u.matrixPending; });
     db.seqUser = j.seqUser || db.users.length;
     db.roster = Array.isArray(j.roster) ? j.roster.map(r => ({ id: r.id, name: String(r.name || ''), active: r.active !== false, leftAt: (r.leftAt && /^\d{4}-\d{2}-\d{2}$/.test(r.leftAt)) ? r.leftAt : null, duesLiable: r.duesLiable !== false })) : [];
     db.seqRoster = j.seqRoster || db.roster.reduce((m, r) => Math.max(m, r.id), 0);
@@ -65,6 +76,7 @@ function loadDb() {
     db.log = Array.isArray(j.log) ? j.log.slice(-LOG_MAX) : [];
     const nowL = Date.now();
     db.invites = Array.isArray(j.invites) ? j.invites.filter(x => x && !x.used && x.expires > nowL) : [];
+    db.magic = Array.isArray(j.magic) ? j.magic.filter(x => x && !x.used && x.expires > nowL) : [];
     db.ledger = Array.isArray(j.ledger) ? j.ledger : [];
     db.seqLedger = j.seqLedger || db.ledger.reduce((m, e) => Math.max(m, e.id || 0), 0);
     const cs = j.cashSettings || {};
@@ -102,6 +114,45 @@ function createInvite(userId) {
   db.invites.push(inv); return inv;
 }
 function findInvite(token) { const t = String(token || ''); return db.invites.find(x => x.token === t && !x.used && x.expires > Date.now()) || null; }
+
+// ---------- Matrix-Login (Verknüpfung + Login-Link) ----------
+// Raum-ID (!id:server) oder Raum-Alias (#alias:server); Gesamtlänge begrenzt.
+function validRoom(s) { s = String(s || '').trim(); return s.length >= 3 && s.length <= 255 && /^[!#][^\s:]+:[^\s:]+$/.test(s) ? s : null; }
+function hmacHex(v) { return crypto.createHmac('sha256', SECRET).update(String(v)).digest('hex'); }
+function eqHex(a, b) { const x = Buffer.from(String(a), 'hex'), y = Buffer.from(String(b), 'hex'); return x.length === y.length && x.length > 0 && crypto.timingSafeEqual(x, y); }
+function newMatrixCode() { return String(crypto.randomInt(0, 1000000)).padStart(6, '0'); }
+// Sende-Auftrag für den Sidecar ablegen (atomar via tmp+rename, ein Auftrag = eine Datei).
+function enqueueMatrix(roomId, body) {
+  try {
+    const id = Date.now().toString(36) + '-' + crypto.randomBytes(8).toString('hex');
+    const tmp = path.join(MATRIX_OUTBOX_DIR, '.' + id + '.tmp');
+    const fin = path.join(MATRIX_OUTBOX_DIR, id + '.json');
+    fs.writeFileSync(tmp, JSON.stringify({ id, roomId: String(roomId), body: String(body), createdAt: Date.now() }), { mode: 0o600 });
+    fs.renameSync(tmp, fin);
+    return true;
+  } catch (e) { console.error('Matrix-Outbox-Fehler:', e.message); return false; }
+}
+function matrixInfo(user) {
+  if (!user) return null;
+  if (user.matrix && user.matrix.verified) return { roomId: user.matrix.roomId, verified: true };
+  if (user.matrixPending && user.matrixPending.expires > Date.now()) return { roomId: user.matrixPending.roomId, verified: false, pending: true, expires: user.matrixPending.expires };
+  return null;
+}
+function createMagic(userId) {
+  db.magic = db.magic.filter(x => !x.used && x.expires > Date.now() && x.userId !== userId); // alte des Nutzers ersetzen
+  const m = { token: crypto.randomBytes(24).toString('base64url'), userId, expires: Date.now() + MATRIX_MAGIC_TTL, used: false, createdAt: Date.now() };
+  db.magic.push(m); return m;
+}
+function findMagic(token) { const t = String(token || ''); return db.magic.find(x => x.token === t && !x.used && x.expires > Date.now()) || null; }
+function publicBase(req) {
+  if (PUBLIC_URL) return PUBLIC_URL;
+  const proto = (String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim()) || 'https';
+  const host = (String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim());
+  return proto + '://' + host + BASE;
+}
+// einfache Ratenbegrenzung je Schlüssel (Matrix-Aktionen): min. Abstand zwischen zwei Aktionen
+const matrixRate = new Map();
+function mRateHit(key, minMs) { const now = Date.now(); const t = matrixRate.get(key) || 0; if (now - t < minMs) return true; matrixRate.set(key, now); return false; }
 function personNameOf(user) { if (!user || user.rosterId == null) return null; const r = db.roster.find(x => x.id === user.rosterId); return r ? r.name : null; }
 function labelKey(k) { return k === 'c9' ? '9' : k === 'cK' ? 'Kränze' : k === 'cP' ? 'Pumpen' : k; }
 function pNameById(id) { const p = db.sheet.players.find(x => x.id === id); return p ? (p.name || '#' + id) : '#' + id; }
@@ -409,6 +460,7 @@ function buildDbExport(full, byUser) {
       mustChangePassword: !!u.mustChangePassword
     }));
     delete snap.invites;
+    delete snap.magic; // Matrix-Login-Tokens
   }
   snap._export = { at: Date.now(), by: (byUser && byUser.username) || null, full: !!full, version: db.version };
   return JSON.stringify(snap, null, 2);
@@ -568,6 +620,47 @@ function handle(req, res) {
     });
   }
 
+  // Matrix-Login: Login-Link anfordern (in den verknüpften Raum). Antwort immer generisch
+  // (kein Rückschluss, ob es den Nutzer gibt / ob er verknüpft ist), um Konten-Aufzählung zu verhindern.
+  if (api === '/login/matrix/request' && req.method === 'POST') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
+    const ip = clientIp(req);
+    if (throttled(ip)) return send(res, 429, { error: 'zu viele Versuche, bitte später erneut' });
+    return readJson(req, body => {
+      const uname = String((body && body.username) || '').trim();
+      const generic = { ok: true, sent: true };
+      if (!uname) return send(res, 400, { error: 'bad request' });
+      const user = db.users.find(x => x.username.toLowerCase() === uname.toLowerCase());
+      if (user && user.matrix && user.matrix.verified && user.matrix.roomId) {
+        // je Nutzer höchstens alle 30 s einen Login-Link erzeugen
+        if (!mRateHit('mlogin:' + user.id, 30000)) {
+          const m = createMagic(user.id); flushDb();
+          const link = publicBase(req) + '/?mlogin=' + m.token;
+          enqueueMatrix(user.matrix.roomId,
+            '🎳 KKk58 – Anmeldung\nDein Login-Link (5 Minuten gültig, einmal verwendbar):\n' + link +
+            '\nWenn du das nicht angefordert hast, ignoriere diese Nachricht.');
+        }
+      }
+      // konstante, generische Antwort
+      send(res, 200, generic);
+    });
+  }
+  // Matrix-Login: Login-Link einlösen -> meldet an (ohne Passwortzwang)
+  if (api === '/login/matrix/redeem' && req.method === 'POST') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
+    const ip = clientIp(req);
+    if (throttled(ip)) return send(res, 429, { error: 'zu viele Versuche, bitte später erneut' });
+    return readJson(req, body => {
+      const m = findMagic(body && body.token);
+      if (!m) { badLogin(ip); return send(res, 404, { error: 'Login-Link ungültig oder abgelaufen' }); }
+      const user = db.users.find(x => x.id === m.userId);
+      if (!user) return send(res, 404, { error: 'Konto nicht gefunden' });
+      m.used = true; flushDb();
+      attempts.delete(ip); setSessionCookie(res, user.id);
+      send(res, 200, { user: { id: user.id, username: user.username, role: user.role }, mustChangePassword: !!user.mustChangePassword, matrix: matrixInfo(user) });
+    });
+  }
+
   if (api === '/login' && req.method === 'POST') {
     if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
     const ip = clientIp(req);
@@ -584,7 +677,7 @@ function handle(req, res) {
   const me = sessionUser(req);
   if (!me) return send(res, 401, { error: 'nicht angemeldet' });
 
-  if (api === '/me' && req.method === 'GET') return send(res, 200, { user: { id: me.id, username: me.username, role: me.role }, mustChangePassword: !!me.mustChangePassword });
+  if (api === '/me' && req.method === 'GET') return send(res, 200, { user: { id: me.id, username: me.username, role: me.role }, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) });
   if (api === '/me/password' && req.method === 'POST') {
     if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
     return readJson(req, body => {
@@ -595,6 +688,43 @@ function handle(req, res) {
       send(res, 200, { ok: true });
     });
   }
+  // Matrix-Raum verknüpfen: Code in den Raum senden lassen (Nachweis, dass der Raum dem Nutzer gehört)
+  if (api === '/me/matrix/link' && req.method === 'POST') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
+    return readJson(req, body => {
+      const room = validRoom(body && body.roomId);
+      if (!room) return send(res, 422, { error: 'Raum-ID ungültig (z. B. !abc:server oder #alias:server)' });
+      if (mRateHit('mlink:' + me.id, 30000)) return send(res, 429, { error: 'Bitte kurz warten, bevor du einen neuen Code anforderst.' });
+      const code = newMatrixCode();
+      me.matrixPending = { roomId: room, codeHash: hmacHex(code), expires: Date.now() + MATRIX_CODE_TTL, tries: 0 };
+      flushDb();
+      const ok = enqueueMatrix(room,
+        '🎳 KKk58 – Verknüpfung\nDein Bestätigungscode: ' + code +
+        '\nGib ihn in der App ein (10 Minuten gültig). Wenn du das nicht warst, ignoriere diese Nachricht.');
+      send(res, 200, { ok: true, queued: ok, roomId: room, expires: me.matrixPending.expires });
+    });
+  }
+  // Matrix-Raum verknüpfen: eingegebenen Code prüfen
+  if (api === '/me/matrix/verify' && req.method === 'POST') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
+    return readJson(req, body => {
+      const p = me.matrixPending;
+      if (!p || !(p.expires > Date.now())) { if (p) { delete me.matrixPending; flushDb(); } return send(res, 410, { error: 'Kein gültiger Code – bitte neu anfordern.' }); }
+      p.tries = (p.tries || 0) + 1;
+      if (p.tries > 5) { delete me.matrixPending; flushDb(); return send(res, 429, { error: 'Zu viele Fehlversuche – bitte neu anfordern.' }); }
+      const code = String((body && body.code) || '').trim();
+      if (!/^\d{6}$/.test(code) || !eqHex(hmacHex(code), p.codeHash)) { flushDb(); return send(res, 401, { error: 'Code falsch', triesLeft: Math.max(0, 5 - p.tries) }); }
+      me.matrix = { roomId: p.roomId, verified: true, linkedAt: Date.now() };
+      delete me.matrixPending; flushDb();
+      send(res, 200, { ok: true, matrix: matrixInfo(me) });
+    });
+  }
+  // Matrix-Verknüpfung entfernen
+  if (api === '/me/matrix/unlink' && req.method === 'POST') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
+    delete me.matrix; delete me.matrixPending; flushDb();
+    return send(res, 200, { ok: true, matrix: null });
+  }
   if (api === '/qr' && req.method === 'GET') {
     const data = u.searchParams.get('data') || '';
     if (!data || data.length > 512) return send(res, 400, { error: 'bad request' });
@@ -602,7 +732,7 @@ function handle(req, res) {
     catch (e) { return send(res, 400, { error: 'Daten zu lang für QR' }); }
   }
   if (api === '/logout' && req.method === 'POST') { clearSessionCookie(res); return send(res, 200, { ok: true }); }
-  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword } });
+  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
   if (api === '/roster' && req.method === 'GET') return send(res, 200, { roster: db.roster });
   if (api === '/archive' && req.method === 'GET') return send(res, 200, { archive: db.archive.map(archiveMeta).sort((a, b) => b.savedAt - a.savedAt) });
   if (api === '/export' && req.method === 'GET') {

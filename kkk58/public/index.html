@@ -30,6 +30,14 @@
   .login button{width:100%;margin-top:16px;padding:12px;border:none;border-radius:9px;background:var(--pine);color:#fff;font-weight:700;font-size:1rem;cursor:pointer}
   .login button:hover{background:var(--pine-dark)}
   .login .err{color:var(--danger);font-weight:600;margin-top:10px;min-height:1.2em}
+  .mxlogin{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+  .mxlogin>a{font-size:.82rem;color:var(--pine-dark);font-weight:600}
+  .mxmsg{font-size:.82rem;color:var(--muted);margin-top:8px;min-height:1em}
+  .mxstatus{font-weight:700;font-size:.9rem;margin:6px 0 10px}
+  .mxstatus.ok{color:var(--pine-dark)} .mxstatus.no{color:var(--muted)}
+  .mxintro{color:var(--muted);font-size:.85rem;margin:0 0 8px}
+  .mxhint{color:var(--muted);font-size:.76rem;margin:6px 0 0}
+  .mxroom{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
   .ovl{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;padding:8vh 16px;z-index:80}
   .ovl .login{margin:0;width:100%;max-width:360px}
   .qrbox{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff}
@@ -77,6 +85,7 @@
   .who{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:.85rem}
   .who .dot{width:8px;height:8px;border-radius:50%;background:#8fd6bf}
   .who .dot.off{background:#e0b0b0}
+  .who #whoName{cursor:pointer} .who #whoName:hover{text-decoration:underline}
   .nav{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
   .nav button{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);color:#fff;border-radius:8px;padding:7px 14px;cursor:pointer;font-weight:700;font-size:.88rem}
   .nav button.active{background:#fff;color:var(--pine-dark);border-color:#fff}
@@ -234,6 +243,15 @@
     <input id="l_pass" type="password" autocomplete="current-password">
     <button id="l_btn" type="button">Anmelden</button>
     <div id="l_err" class="err"></div>
+    <div class="mxlogin">
+      <a href="#" id="l_matrix_toggle">Kein Passwort? Login-Link per Matrix anfordern</a>
+      <div id="l_matrix_box" class="hidden">
+        <label for="l_mx_user">Benutzername</label>
+        <input id="l_mx_user" type="text" autocomplete="username" autocapitalize="off">
+        <button id="l_mx_send" type="button">Login-Link senden</button>
+        <div id="l_mx_msg" class="mxmsg"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -261,6 +279,33 @@
     <input id="pw_new2" type="password" autocomplete="new-password">
     <button id="pw_btn" type="button" style="margin-top:12px">Passwort speichern</button>
     <div id="pw_err" class="err"></div>
+  </div>
+</div>
+
+<!-- MATRIX-LOGIN EINRICHTEN -->
+<div id="mxdlg" class="ovl hidden">
+  <div class="login">
+    <div class="eyebrow">Konto</div>
+    <h1>Matrix-Login</h1>
+    <p class="mxintro">Verknüpfe deinen persönlichen KKk58-Bot-Chat, um dir künftig einen Login-Link (5 Minuten gültig) statt eines Passworts schicken zu lassen.</p>
+    <div id="mx_status" class="mxstatus"></div>
+
+    <div id="mx_linkbox">
+      <label for="mx_room">Raum-ID deines Bot-Chats</label>
+      <input id="mx_room" type="text" autocapitalize="off" autocomplete="off" placeholder="!abc123:matrix.example.org">
+      <p class="mxhint">Die Raum-ID findest du in deinem Matrix-Client in den Raum-Einstellungen (beginnt mit ! oder als Alias mit #). Der KKk58-Bot muss Mitglied des Raums sein.</p>
+      <button id="mx_reqcode" type="button">Bestätigungscode senden</button>
+
+      <div id="mx_verifybox" class="hidden">
+        <label for="mx_code">Code aus dem Chat</label>
+        <input id="mx_code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-stelliger Code">
+        <button id="mx_verify" type="button">Code bestätigen</button>
+      </div>
+    </div>
+
+    <button id="mx_unlink" type="button" class="btn warn hidden" style="width:100%;margin-top:10px">Verknüpfung entfernen</button>
+    <div id="mx_err" class="err"></div>
+    <button id="mx_close" type="button" class="btn ghost" style="width:100%;margin-top:12px">Schließen</button>
   </div>
 </div>
 
@@ -461,6 +506,8 @@
   async function boot(){
     const params=new URLSearchParams(location.search); const tk=params.get('invite');
     if(tk){ return showInvite(tk); }
+    const ml=params.get('mlogin');
+    if(ml){ return redeemMagic(ml); }
     const r=await api('/me');
     if(r.ok&&r.data&&r.data.user){ me=r.data.user; showApp(); await loadState(); connect(); if(r.data.mustChangePassword) openPwDialog(); }
     else showLogin();
@@ -473,6 +520,7 @@
   function effCash(){ return canCash(effRole()); }
   function applyRoleUI(){ if(!me) return; const eff=effRole(), manage=canManage(eff);
     $("whoName").textContent=me.username+" ("+roleLabel(me.role)+")"+(viewRole?" · Vorschau: "+roleLabel(viewRole):"");
+    $("whoName").title="Konto & Matrix-Login"+((me.matrix&&me.matrix.verified)?" · Matrix verknüpft":"");
     $("adminPanel").hidden=!manage; $("nav_cash").classList.remove("hidden");
     const seg=$("rvSeg"); if(seg) seg.querySelectorAll("button").forEach(b=>b.classList.toggle("active", b.dataset.vr===eff));
     $("rvNote").textContent = viewRole ? "Nur Vorschau – deine echten Rechte bleiben Admin." : "";
@@ -512,6 +560,79 @@
     else { $("inv_err").textContent=(r.data&&r.data.error)||"Einlösen fehlgeschlagen"; $("inv_btn").classList.add("hidden"); $("inv_alt").classList.remove("hidden"); }
   });
   $("inv_tologin").addEventListener("click",e=>{ e.preventDefault(); cleanInviteUrl(); showLogin(); });
+
+  // ---------- Matrix-Login-Link einlösen ----------
+  async function redeemMagic(token){
+    const r=await api('/login/matrix/redeem',{method:'POST',body:{token}});
+    if(r.ok){ me=r.data.user; cleanInviteUrl(); showApp(); await loadState(); connect(); if(r.data.mustChangePassword) openPwDialog(); }
+    else { cleanInviteUrl(); showLogin(); $("l_err").textContent=(r.data&&r.data.error)||"Login-Link ungültig oder abgelaufen"; }
+  }
+
+  // ---------- Login-Screen: Login-Link per Matrix anfordern ----------
+  $("l_matrix_toggle").addEventListener("click",e=>{ e.preventDefault();
+    const box=$("l_matrix_box"); box.classList.toggle("hidden");
+    if(!box.classList.contains("hidden")){ if(!$("l_mx_user").value) $("l_mx_user").value=$("l_user").value.trim(); $("l_mx_user").focus(); }
+  });
+  async function requestMatrixLogin(){
+    const u=$("l_mx_user").value.trim(); if(!u){ $("l_mx_msg").textContent="Bitte Benutzername eingeben."; return; }
+    $("l_mx_send").disabled=true;
+    await api('/login/matrix/request',{method:'POST',body:{username:u}});
+    $("l_mx_send").disabled=false;
+    // bewusst generische Rückmeldung (kein Rückschluss, ob das Konto existiert/verknüpft ist)
+    $("l_mx_msg").textContent="Falls ein verknüpftes Matrix-Konto existiert, wurde ein Login-Link in deinen Bot-Chat gesendet. Er ist 5 Minuten gültig.";
+  }
+  $("l_mx_send").addEventListener("click",requestMatrixLogin);
+  $("l_mx_user").addEventListener("keydown",e=>{if(e.key==='Enter')requestMatrixLogin();});
+
+  // ---------- Matrix-Login einrichten (Dialog über Klick auf den eigenen Namen) ----------
+  function mxState(){ return (me&&me.matrix)||null; }
+  function renderMatrixDialog(){
+    const st=mxState(); const stEl=$("mx_status"); const verified=!!(st&&st.verified);
+    $("mx_err").textContent="";
+    if(verified){
+      stEl.className="mxstatus ok";
+      stEl.innerHTML='✓ Verknüpft mit Raum <span class="mxroom">'+esc(st.roomId)+'</span>';
+      $("mx_unlink").classList.remove("hidden");
+      if(!$("mx_room").value) $("mx_room").value=st.roomId;
+    } else {
+      stEl.className="mxstatus no";
+      stEl.textContent = (st&&st.pending) ? "Verknüpfung läuft – Code aus dem Chat eingeben." : "Noch nicht verknüpft.";
+      $("mx_unlink").classList.add("hidden");
+      if(st&&st.roomId&&!$("mx_room").value) $("mx_room").value=st.roomId;
+    }
+    $("mx_verifybox").classList.toggle("hidden", !(st&&st.pending));
+  }
+  function openMatrixDialog(){ if(!me) return; $("mxdlg").classList.remove("hidden"); $("mx_code").value=""; renderMatrixDialog(); }
+  function closeMatrixDialog(){ $("mxdlg").classList.add("hidden"); }
+  $("mx_close").addEventListener("click",closeMatrixDialog);
+  $("whoName").addEventListener("click",openMatrixDialog);
+  $("mx_reqcode").addEventListener("click",async()=>{
+    $("mx_err").textContent=""; const room=$("mx_room").value.trim();
+    if(!room){ $("mx_err").textContent="Bitte Raum-ID eingeben."; return; }
+    $("mx_reqcode").disabled=true;
+    const r=await api('/me/matrix/link',{method:'POST',body:{roomId:room}});
+    $("mx_reqcode").disabled=false;
+    if(r.ok){
+      me.matrix={roomId:r.data.roomId,pending:true,verified:false,expires:r.data.expires};
+      renderMatrixDialog(); $("mx_verifybox").classList.remove("hidden"); $("mx_code").focus();
+      toast(r.data.queued?"Code gesendet – schau in deinen Bot-Chat":"Code erzeugt (Sidecar prüfen)");
+    } else $("mx_err").textContent=(r.data&&r.data.error)||"Konnte Code nicht senden";
+  });
+  async function verifyMatrixCode(){
+    $("mx_err").textContent=""; const code=$("mx_code").value.trim();
+    if(!/^\d{6}$/.test(code)){ $("mx_err").textContent="Bitte den 6-stelligen Code eingeben."; return; }
+    const r=await api('/me/matrix/verify',{method:'POST',body:{code}});
+    if(r.ok){ me.matrix=r.data.matrix; renderMatrixDialog(); toast("Matrix-Login verknüpft"); }
+    else $("mx_err").textContent=(r.data&&r.data.error)||"Code falsch";
+  }
+  $("mx_verify").addEventListener("click",verifyMatrixCode);
+  $("mx_code").addEventListener("keydown",e=>{if(e.key==='Enter')verifyMatrixCode();});
+  $("mx_unlink").addEventListener("click",async()=>{
+    if(!confirm("Matrix-Verknüpfung wirklich entfernen?"))return;
+    const r=await api('/me/matrix/unlink',{method:'POST'});
+    if(r.ok){ me.matrix=null; $("mx_room").value=""; $("mx_code").value=""; renderMatrixDialog(); toast("Verknüpfung entfernt"); }
+    else $("mx_err").textContent=(r.data&&r.data.error)||"Fehler";
+  });
 
   // ---------- Erstanmeldung: Passwort setzen ----------
   function openPwDialog(){ $("pwdlg").classList.remove("hidden"); $("pw_new").value=""; $("pw_new2").value=""; $("pw_err").textContent=""; setTimeout(()=>$("pw_new").focus(),60); }

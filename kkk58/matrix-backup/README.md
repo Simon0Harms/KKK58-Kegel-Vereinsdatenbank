@@ -58,6 +58,33 @@ pip install "matrix-nio[e2e]" --break-system-packages
 - Beim allerersten Start wird die Historie **nicht** nachgepostet (nur ab jetzt), aber
   ein initiales Voll-Backup hochgeladen.
 
+## Matrix-Login (Anmeldung per Login-Link)
+
+Zusätzlich zum Backup stellt der Sidecar die Nachrichten für den **Matrix-Login** der
+App zu (Verknüpfungscodes und zeitlich begrenzte Login-Links). Damit die
+abhängigkeitsfreie Node-App nicht selbst mit Matrix sprechen muss, läuft die
+Kommunikation über einen **Datei-Spool**:
+
+- Die Node-App legt jeden Sende-Auftrag als einzelne JSON-Datei im Verzeichnis
+  `KKK_OUTBOX_DIR` ab (Standard: `<db-Verzeichnis>/matrix-outbox`, also neben
+  `data/db.json`). Ein Auftrag enthält Ziel-Raum und Nachrichtentext.
+- Der Sidecar arbeitet den Spool bei jedem Poll-Durchlauf ab: er sendet die Nachricht
+  **verschlüsselt** in den jeweiligen Raum und **löscht** die Datei nach Erfolg.
+- Aufträge, die älter als `KKK_OUTBOX_TTL` (Standard 900 s) sind, werden verworfen –
+  die Codes/Links sind bis dahin ohnehin abgelaufen (Code 10 min, Login-Link 5 min).
+- Der Sidecar **nimmt Raum-Einladungen automatisch an**. So kann ein Mitglied im
+  Matrix-Client einen 1:1-Chat mit dem Bot starten; sobald der Bot beigetreten ist,
+  kann es dessen Raum-ID in der App unter **Name (oben) → Matrix-Login** hinterlegen.
+
+Wichtig: Der Node-Server braucht dafür eine korrekte öffentliche Basis-URL, damit der
+Login-Link absolut ist. Setze in der Umgebung der **Node-App** `KKK_PUBLIC_URL`
+(z. B. `https://nas.example.net/kkk58`). Ohne die Variable wird die URL aus den
+`X-Forwarded-*`-Headern des Reverse-Proxys abgeleitet.
+
+Bei `KKK_REQUIRE_ENCRYPTION=1` (Standard) sendet der Sidecar auch Login-Nachrichten
+**nur in verschlüsselte Räume**; ein unverschlüsselter Zielraum führt dazu, dass der
+Auftrag verworfen wird (kein Klartext-Versand von Login-Links).
+
 ## Wiederherstellung
 
 Backup-Datei im Matrix-Client herunterladen (wird automatisch entschlüsselt), dann:
@@ -73,8 +100,9 @@ sudo systemctl start kkk58
 - **Der Raum MUSS verschlüsselt sein.** Bei `KKK_REQUIRE_ENCRYPTION=1` (Standard)
   sendet der Dienst gar nichts, falls der Raum unverschlüsselt ist.
 - Das hochgeladene Backup ist **bereinigt**: Passwort-Hashes/Salts der Konten
-  (`hash`/`salt`) und die Einladungs-/Einmal-Login-Tokens (`invites`) werden vor dem
-  Upload entfernt (siehe `sanitize_db`); lässt sich die `db.json` ausnahmsweise nicht
+  (`hash`/`salt`), die Einladungs-/Einmal-Login-Tokens (`invites`), die
+  Matrix-Login-Tokens (`magic`) sowie laufende Verknüpfungscodes (`matrixPending` je
+  Konto) werden vor dem Upload entfernt (siehe `sanitize_db`); lässt sich die `db.json` ausnahmsweise nicht
   parsen, wird der Upload dieses Durchlaufs **übersprungen** statt Rohdaten hochzuladen.
   Das Backup enthält weiterhin Konten-Metadaten (Benutzername, Rolle), Namen und
   Kassendaten – beschränke die Raummitgliedschaft dennoch streng und teile die
