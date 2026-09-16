@@ -843,6 +843,8 @@ function buildExportHtml() {
 
 // ---------- Operationen (mit Live-Broadcast) ----------
 function findP(id) { return db.sheet.players.find(p => p.id === id); }
+function throwCount(p, lanes) { let n = 0; if (lanes.bohle) { if (p.b1 != null) n++; if (p.b2 != null) n++; } if (lanes.schere) { if (p.s1 != null) n++; if (p.s2 != null) n++; } return n; }
+function throwsUnequal(s) { if (!s.players || s.players.length < 2) return false; return new Set(s.players.map(p => throwCount(p, s.lanes))).size > 1; }
 function applyOp(op, user) {
   const s = db.sheet;
   switch (op && op.type) {
@@ -1240,6 +1242,9 @@ function handle(req, res) {
     if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
     return readJson(req, body => {
       if (!body || !body.op) return send(res, 400, { error: 'bad request' });
+      if (body.op.type === 'saveGame' && me.role !== 'admin' && throwsUnequal(db.sheet)) {
+        return send(res, 422, { error: 'Ungleiche Wurf-Anzahl – nur ein Admin kann ein solches Spiel speichern.' });
+      }
       const ctx = {};
       if (body.op.type === 'removePlayer') { const rp = db.sheet.players.find(p => p.id === body.op.id); ctx.removedName = rp ? rp.name : ''; }
       const norm = applyOp(body.op, me);

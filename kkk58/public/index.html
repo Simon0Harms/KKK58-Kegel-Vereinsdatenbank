@@ -1299,7 +1299,34 @@
   $("sort_pts").addEventListener("click",()=>setSort('points'));
   $("btn_print").addEventListener("click",()=>window.print());
   $("btn_reset").addEventListener("click",()=>{ if(confirm("Aktuelle Liste leeren? Das entfernt alle Spieler aus der laufenden Liste (Archiv bleibt).")) opStruct({type:'reset'}); });
+  function saveCheck(){
+    const issues=[]; const throwCounts=[];
+    state.players.forEach(p=>{
+      const fehlt=[]; let filled=0, lanes=0;
+      if(!(p.name||"").trim()) fehlt.push("kein Name");
+      if(state.lanes.bohle){ const a=p.b1!=null,b=p.b2!=null; if(a)filled++; if(b)filled++; if(a&&b)lanes++; if(!a)fehlt.push("Bo 1"); if(!b)fehlt.push("Bo 2"); }
+      if(state.lanes.schere){ const a=p.s1!=null,b=p.s2!=null; if(a)filled++; if(b)filled++; if(a&&b)lanes++; if(!a)fehlt.push("Sc 1"); if(!b)fehlt.push("Sc 2"); }
+      throwCounts.push(filled);
+      const name=(p.name||"(ohne Namen)");
+      if(lanes===0) issues.push("• "+name+": keine vollständige Bahn");
+      else if(fehlt.length) issues.push("• "+name+": "+fehlt.join(", ")+" fehlt");
+    });
+    return { issues, unequal:new Set(throwCounts).size>1 };
+  }
   $("btn_save").addEventListener("click",async()=>{ if(!state.players.length){toast("Keine Spieler zum Speichern.");return;}
+    const chk=saveCheck();
+    const isAdmin=!!(me&&me.role==='admin');
+    if(chk.unequal && !isAdmin){
+      alert("Speichern nicht möglich:\n\nNicht alle Spieler haben gleich viele Würfe. Bitte die Wurf-Ergebnisse angleichen.\n(Nur ein Admin kann ein solches Spiel speichern.)");
+      return;
+    }
+    if(chk.issues.length||chk.unequal){
+      let msg="Es ist noch nicht alles ausgefüllt:\n\n";
+      if(chk.unequal) msg+="⚠ Achtung: Nicht alle Spieler haben gleich viele Würfe. Als Admin kannst du trotzdem speichern.\n";
+      if(chk.issues.length) msg+=chk.issues.join("\n")+"\n";
+      msg+="\nIst das Spiel wirklich beendet und soll trotzdem gespeichert werden?";
+      if(!confirm(msg)) return;
+    }
     if(!confirm("Aktuelles Spiel ins Archiv speichern?"))return;
     const r=await api('/op',{method:'POST',body:{op:{type:'saveGame',opId:rid()}}});
     if(r.ok){ toast("Spiel gespeichert."); if(confirm("Neues Spiel beginnen (Liste leeren)? Abbrechen = Liste behalten.")) opStruct({type:'newGame'}); }
