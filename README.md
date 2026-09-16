@@ -251,6 +251,33 @@ Spiel ins Archiv übernommen.
   Zeilen nicht. Erneutes Antippen von „Punkte" sortiert neu.
 - Im Archiv-Detail zeigt die Spalte **„Ank."** die gespeicherte Ankunftsposition.
 
+### Bahnen wählen: Anzahl & Disziplin je Bahn
+Über dem Anschreib-Feld wird die **Bahn-Konstellation** festgelegt:
+
+- **Anzahl:** **1 Bahn** oder **2 Bahnen**.
+- **Disziplin je Bahn:** Bei **einer** Bahn wählt man deren Disziplin (**Bohle** oder **Schere**);
+  bei **zwei** Bahnen ordnet man **Bahn 1** und **Bahn 2** je **unabhängig** eine Disziplin zu.
+  Beide Bahnen dürfen **dieselbe** Disziplin haben – also z. B. **zwei Scherenbahnen** oder
+  **zwei Bohlenbahnen** (nicht nur die klassische Kombination Bohle + Schere).
+- Die **Spaltenreihenfolge** der Tabelle folgt der gewählten physischen Bahn-Reihenfolge
+  (z. B. „B1 Sc … | B2 Bo …"), im Archiv-Detail und im HTML-Export ebenso.
+
+**Vorschlag je Kegelort:** Beim **Auswählen eines Orts** wird – solange noch **keine Punkte**
+eingetragen sind – automatisch die **zuletzt an diesem Ort gespielte Konstellation** übernommen
+(ein Hinweis erscheint kurz). Hat der Ort noch keine Historie, dient als **Rückfall** die zuletzt
+insgesamt gespielte Konstellation. Der Vorschlag ist **nicht-destruktiv**: Sobald Werte in der Liste
+stehen, wird nichts mehr automatisch umgestellt (manuelles Umschalten bleibt jederzeit möglich).
+
+Technisch: `sheet.bahnen` (geordnetes Disziplin-Array, Index 0 = Bahn 1; **Duplikate erlaubt**) ist
+die Quelle der Wahrheit. Die **Punkte werden je physischer Bahn** gespeichert (`l1a/l1b` = Bahn 1,
+`l2a/l2b` = Bahn 2) – dadurch sind auch zwei gleiche Bahnen möglich. `sheet.lanes {bohle,schere}`
+bleibt als abgeleiteter Cache (welche Disziplinen vorkommen) für Statistik/Kasse erhalten; die
+disziplin-basierten Kennzahlen (Beste Bo/Sc) werden aus den Bahn-Werten aggregiert. Op
+**`setBahnen`** setzt die Konstellation live-synchronisiert. Gemerkt wird sie je Ort in
+`places[].lastBahnen` und global in `lastBahnen` (beim Archivieren). Alt-Datenbanken werden
+automatisch migriert: `bahnen` aus `lanes` (Bohle vor Schere), Spieler-/Archiv-Punkte vom alten
+Disziplin-Format (`b1/b2/s1/s2`) ins Bahn-Format.
+
 ### Ein Spiel speichern (Archiv)
 - Button **„💾 Spiel speichern"** legt die aktuelle Liste als **Snapshot** ins Archiv
   (mit Datum, Anlass, allen Werten, Ankunftsreihenfolge, Kasse und Auswertung). Das darf **jedes Mitglied**.
@@ -304,8 +331,9 @@ Positionen möglich).
 ### Datenmodell (Ergänzung in `data/db.json`)
 - `roster: [{id, name, active}]` – Spielerstamm, `seqRoster`
 - `sheet.players[].rosterId` – Verweis vom Listenspieler auf den Stamm
-- `archive: [{id, savedAt, savedBy, event, date, lanes, priceNK, pricePump, pumpen, note,
-  players:[{rosterId, name, c9, cK, cP, b1, b2, s1, s2}]}]` – gespeicherte Spiele, `seqArchive`
+- `archive: [{id, savedAt, savedBy, event, date, bahnen, lanes, priceNK, pricePump, pumpen, note,
+  players:[{rosterId, name, c9, cK, cP, l1a, l1b, l2a, l2b}]}]` – gespeicherte Spiele, `seqArchive`
+  (ältere Snapshots tragen noch `b1/b2/s1/s2`; beide Formate werden gelesen)
 
 Neue Operationen (alle live-synchronisiert): `addRoster`, `renameRoster` (Admin),
 `setRosterActive` (Admin), `removeRoster` (Admin), `saveGame`, `deleteGame` (Admin), `newGame`.

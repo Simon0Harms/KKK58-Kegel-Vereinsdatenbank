@@ -115,7 +115,12 @@
   .btnrow .danger{background:rgba(0,0,0,.14)}
 
   .controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
-  .lanepick{display:flex;gap:8px;flex-wrap:wrap}
+  .lanepick{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .lanepick .sortlbl{align-self:center}
+  .baneseg{align-items:center}
+  .segcap{padding:6px 8px 6px 12px;font-size:.72rem;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}
+  .seg button[data-d="bohle"].active{background:var(--lane,#2f6f4f);color:#fff}
+  .seg button[data-d="schere"].active{background:var(--lane,#2f6f4f);color:#fff}
   .chip{display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none;border:1.5px solid var(--line-strong);border-radius:20px;padding:6px 12px;background:var(--card);font-weight:600;font-size:.9rem}
   .chip input{width:16px;height:16px;accent-color:var(--lane);margin:0}
   .chip.on{border-color:var(--lane);background:var(--lane-soft);color:var(--lane-ink)}
@@ -568,9 +573,22 @@
   <!-- ===== ANSCHREIBEN ===== -->
   <section id="view_sheet">
     <div class="controls">
-      <div class="lanepick">
-        <label class="chip" id="lbl_bohle"><input type="checkbox" id="chk_bohle">Bohlenbahn</label>
-        <label class="chip" id="lbl_schere"><input type="checkbox" id="chk_schere">Scherenbahn</label>
+      <div class="lanepick" id="lanepick">
+        <span class="sortlbl">Bahnen:</span>
+        <div class="seg" id="bahncount" title="Anzahl der gespielten Bahnen">
+          <button type="button" data-n="1">1 Bahn</button>
+          <button type="button" data-n="2">2 Bahnen</button>
+        </div>
+        <div class="seg baneseg" id="bahn1seg" title="Disziplin der 1. Bahn">
+          <span class="segcap" id="bahn1cap">Bahn 1</span>
+          <button type="button" data-b="0" data-d="bohle">Bohle</button>
+          <button type="button" data-b="0" data-d="schere">Schere</button>
+        </div>
+        <div class="seg baneseg" id="bahn2seg" title="Disziplin der 2. Bahn">
+          <span class="segcap">Bahn 2</span>
+          <button type="button" data-b="1" data-d="bohle">Bohle</button>
+          <button type="button" data-b="1" data-d="schere">Schere</button>
+        </div>
       </div>
       <div class="sortpick">
         <span class="sortlbl">Reihenfolge:</span>
@@ -930,7 +948,7 @@
   const canManage=r=>r==="admin"||r==="kassenwart"||r==="mitglied";
   const canCash=r=>r==="admin"||r==="kassenwart";
   const roleLabel=r=>ROLE_LABEL[r]||r;
-  let me=null, state=null, roster=[], places=[], prizes=[], trips=[], develop=[], events=[], polls=[], version=0, es=null, currentView="sheet", sortMode="arrival";
+  let me=null, state=null, roster=[], places=[], prizes=[], trips=[], develop=[], events=[], polls=[], version=0, es=null, currentView="sheet", sortMode="arrival", lastBahnen=null;
   const pending=new Set();
   const rid=()=> (crypto.randomUUID? crypto.randomUUID() : String(Date.now())+Math.random());
   const $=id=>document.getElementById(id);
@@ -1129,7 +1147,7 @@
   $("pw_new2").addEventListener("keydown",e=>{if(e.key==='Enter')submitPw();});
 
   async function loadState(){ const r=await api('/state');
-    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; places=r.data.places||[]; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; events=r.data.events||[]; polls=r.data.polls||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderPlaceSelect(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog();
+    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; places=r.data.places||[]; lastBahnen=r.data.lastBahnen||null; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; events=r.data.events||[]; polls=r.data.polls||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderPlaceSelect(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog();
       if(me&&me.mustChangePassword&&$("pwdlg").classList.contains("hidden")) openPwDialog(); }
     else if(r.status===401) showLogin(); }
   function resync(){ loadState(); }
@@ -1191,7 +1209,7 @@
     es.onopen=()=>$("conn").classList.remove("off");
     es.onerror=()=>$("conn").classList.add("off");
     es.onmessage=ev=>{ let m; try{m=JSON.parse(ev.data);}catch(_){return;}
-      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; places=m.places||places; prizes=m.prizes||prizes; trips=m.trips||trips; develop=m.develop||develop; events=m.events||events; polls=m.polls||polls; version=m.v; pending.clear(); rebuildDatalist(); renderPlaceSelect(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog(); return; }
+      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; places=m.places||places; lastBahnen=m.lastBahnen||lastBahnen; prizes=m.prizes||prizes; trips=m.trips||trips; develop=m.develop||develop; events=m.events||events; polls=m.polls||polls; version=m.v; pending.clear(); rebuildDatalist(); renderPlaceSelect(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog(); return; }
       applyRemote(m); }; }
   function applyRemote(m){
     if(typeof m.v!=='number')return;
@@ -1214,7 +1232,8 @@
       case 'removePlace': places=places.filter(x=>x.id!==op.id); if(state.placeId===op.id) state.placeId=null; renderPlaceSelect(); renderPlaceList(); return;
       case 'setNote': state[op.field]=op.value; setInput('note:'+op.field,op.value); break;
       case 'setPrice': state[op.field]=op.value; setInput('price:'+op.field,op.value); updateDerived(); break;
-      case 'setLane': state.lanes[op.lane]=op.on; renderAll(); return;
+      case 'setLane': { state.lanes[op.lane]=op.on; let bn=(state.bahnen||[]).filter(d=>state.lanes[d]); ['bohle','schere'].forEach(d=>{ if(state.lanes[d]&&!bn.includes(d))bn.push(d); }); state.bahnen=bn; renderAll(); return; }
+      case 'setBahnen': state.bahnen=(op.bahnen||[]).slice(); state.lanes=op.lanes||{bohle:state.bahnen.includes('bohle'),schere:state.bahnen.includes('schere')}; renderAll(); return;
       case 'addPlayer': if(op.roster && !roster.some(r=>r.id===op.roster.id)){roster.push(op.roster);rebuildDatalist();renderRosterAdmin();} state.players.push(normP(op.player)); renderAll(); return;
       case 'removePlayer': state.players=state.players.filter(p=>p.id!==op.id); renderAll(); return;
       case 'order': state.players.sort((a,b)=>op.ids.indexOf(a.id)-op.ids.indexOf(b.id)); renderAll(); return;
@@ -1249,7 +1268,7 @@
     updateDerived();
   }
   function setInput(fkey,val){ const el=q('[data-fkey="'+cssq(fkey)+'"]'); if(el&&el!==document.activeElement)el.value=val; }
-  function normP(p){ return {id:p.id,rosterId:p.rosterId??null,name:p.name||'',c9:p.c9||0,cK:p.cK||0,cP:p.cP||0,b1:p.b1??null,b2:p.b2??null,s1:p.s1??null,s2:p.s2??null}; }
+  function normP(p){ return {id:p.id,rosterId:p.rosterId??null,name:p.name||'',c9:p.c9||0,cK:p.cK||0,cP:p.cP||0,l1a:p.l1a??null,l1b:p.l1b??null,l2a:p.l2a??null,l2b:p.l2b??null}; }
 
   // ---------- Ops senden ----------
   function send(op){ op.opId=rid(); api('/op',{method:'POST',body:{op}}).then(r=>{ if(r&&r.status===401)showLogin(); else if(r&&!r.ok){ toast((r.data&&r.data.error)||'Fehler'); resync(); } }).catch(()=>toast('Verbindungsproblem')); return op.opId; }
@@ -1258,9 +1277,20 @@
   function opStruct(op){ send(op); }
 
   // ---------- Berechnung (Live-Sheet) ----------
-  const bohleSum=p=>state.lanes.bohle?(p.b1||0)+(p.b2||0):0;
-  const schereSum=p=>state.lanes.schere?(p.s1||0)+(p.s2||0):0;
-  const total=p=>bohleSum(p)+schereSum(p);
+  // Punkte werden je physischer Bahn gespeichert (l1a/l1b = Bahn 1, l2a/l2b = Bahn 2);
+  // die Disziplin je Bahn steckt in state.bahnen. So sind auch zwei gleiche Bahnen möglich.
+  const LANE_SLOTS=[['l1a','l1b'],['l2a','l2b']];
+  const DISC_LABEL={ bohle:{short:'Bo',long:'Bohle'}, schere:{short:'Sc',long:'Schere'} };
+  const otherDisc=d=>d==='bohle'?'schere':'bohle';
+  function rowIsNew(r){ return LANE_SLOTS.some(([a,b])=>a in r||b in r); }
+  function rowLane(r,i,d){ return rowIsNew(r)?[r[LANE_SLOTS[i][0]],r[LANE_SLOTS[i][1]]]:(d==='bohle'?[r.b1,r.b2]:[r.s1,r.s2]); }
+  // Aktive Bahnen in gewählter Reihenfolge (Fallback aus lanes für Altzustände)
+  function activeBahnen(){ let bn=Array.isArray(state.bahnen)?state.bahnen.filter(d=>DISC_LABEL[d]):[]; if(!bn.length){ bn=[]; if(state.lanes&&state.lanes.bohle)bn.push('bohle'); if(state.lanes&&state.lanes.schere)bn.push('schere'); if(!bn.length)bn=['bohle']; } return bn; }
+  const laneSum=(p,i,d)=>{ const lv=rowLane(p,i,d); return (lv[0]||0)+(lv[1]||0); };
+  const discSum=(p,disc)=>activeBahnen().reduce((s,d,i)=>s+(d===disc?laneSum(p,i,d):0),0);
+  const bohleSum=p=>discSum(p,'bohle');
+  const schereSum=p=>discSum(p,'schere');
+  const total=p=>activeBahnen().reduce((s,d,i)=>s+laneSum(p,i,d),0);
   function ranking(){ const s=state.players.map(p=>({id:p.id,t:total(p)})).sort((a,b)=>b.t-a.t);
     const pl={};let lt=null,lp=0; s.forEach((r,i)=>{ if(r.t===lt)pl[r.id]=lp; else{pl[r.id]=i+1;lp=i+1;lt=r.t;} }); return pl; }
   function silberWinners(){ let mx=0; state.players.forEach(p=>{const v=total(p);if(v>mx)mx=v;}); if(mx<=0)return{ids:new Set(),max:0,names:[]};
@@ -1288,8 +1318,7 @@
     $("f_event").value=state.event||""; $("f_date").value=state.date||"";
     renderPlaceSelect();
     if(document.body.classList.contains("focus"))updateFocusMeta();
-    $("chk_bohle").checked=!!state.lanes.bohle; $("chk_schere").checked=!!state.lanes.schere;
-    $("lbl_bohle").classList.toggle("on",!!state.lanes.bohle); $("lbl_schere").classList.toggle("on",!!state.lanes.schere);
+    renderLaneControls();
     $("f_pumpen").value=state.pumpen||""; $("f_note").value=state.note||"";
     $("p_nk").value=state.priceNK; $("p_pump").value=state.pricePump;
     buildHead(); tbody.innerHTML="";
@@ -1302,8 +1331,8 @@
   }
   function buildHead(){
     let h='<tr><th title="Platz">Pl.</th><th>Name</th><th title="Neuner">9</th><th title="Kränze">⑧</th><th title="Pumpen">Pump</th>';
-    if(state.lanes.bohle)h+='<th class="grp">Bo 1</th><th class="grp">Bo 2</th><th class="grp">ΣBo</th>';
-    if(state.lanes.schere)h+='<th class="grp">Sc 1</th><th class="grp">Sc 2</th><th class="grp">ΣSc</th>';
+    activeBahnen().forEach((d,i)=>{ const m=DISC_LABEL[d]; const tt='Bahn '+(i+1)+' – '+m.long;
+      h+='<th class="grp" title="'+tt+'">B'+(i+1)+' '+m.short+' 1</th><th class="grp" title="'+tt+'">B'+(i+1)+' '+m.short+' 2</th><th class="grp" title="Summe '+tt+'">Σ'+m.short+'</th>'; });
     h+='<th>Σ</th><th title="Silberkegel">Ⓢ</th><th title="Pumpenkegel">Ⓟ</th><th></th></tr>'; thead.innerHTML=h;
   }
   function stepper(p,key){
@@ -1330,8 +1359,9 @@
     const tdPl=document.createElement("td"); tdPl.innerHTML='<span class="medal none">–</span>'; tr.appendChild(tdPl);
     const tdName=document.createElement("td"); tdName.className="name"; tdName.innerHTML='<span class="pname">'+esc(p.name||"(ohne Namen)")+'</span>'; tr.appendChild(tdName);
     tr.appendChild(cellStep(p,"c9")); tr.appendChild(cellStep(p,"cK")); tr.appendChild(cellStep(p,"cP"));
-    if(state.lanes.bohle){ tr.appendChild(scoreCell(p,"b1")); tr.appendChild(scoreCell(p,"b2")); const s=document.createElement("td");s.className="lanesum sumBo";s.textContent="0";tr.appendChild(s); }
-    if(state.lanes.schere){ tr.appendChild(scoreCell(p,"s1")); tr.appendChild(scoreCell(p,"s2")); const s=document.createElement("td");s.className="lanesum sumSc";s.textContent="0";tr.appendChild(s); }
+    activeBahnen().forEach((d,i)=>{ const sl=LANE_SLOTS[i];
+      tr.appendChild(scoreCell(p,sl[0])); tr.appendChild(scoreCell(p,sl[1]));
+      const s=document.createElement("td"); s.className="lanesum bsum"; s.dataset.bi=i; s.textContent="0"; tr.appendChild(s); });
     const tdT=document.createElement("td");tdT.className="total";tdT.textContent="0";tr.appendChild(tdT);
     const tdG=document.createElement("td");tdG.className="g8";tr.appendChild(tdG);
     const tdPk=document.createElement("td");tdPk.className="pk";tr.appendChild(tdPk);
@@ -1345,8 +1375,7 @@
     if(!state)return;
     const place=ranking(); const any=state.players.some(p=>total(p)>0);
     tbody.querySelectorAll("tr").forEach(tr=>{ const p=state.players.find(x=>x.id===Number(tr.dataset.pid)); if(!p)return;
-      const b=tr.querySelector(".sumBo"); if(b)b.textContent=bohleSum(p);
-      const s=tr.querySelector(".sumSc"); if(s)s.textContent=schereSum(p);
+      const bn=activeBahnen(); tr.querySelectorAll(".bsum").forEach(td=>{ const i=Number(td.dataset.bi); td.textContent=laneSum(p,i,bn[i]); });
       tr.querySelector(".total").textContent=total(p);
       const m=tr.querySelector(".medal");
       if(any&&total(p)>0){const pl=place[p.id];m.className="medal "+medalCls(pl);m.textContent=pl;}else{m.className="medal none";m.textContent="–";}
@@ -1387,8 +1416,35 @@
   $("p_nk").addEventListener("blur",()=>{$("p_nk").value=state.priceNK;opValue({type:'setPrice',field:'priceNK',value:state.priceNK});});
   $("p_pump").addEventListener("input",e=>{state.pricePump=parsePrice(e.target.value);updateDerived();});
   $("p_pump").addEventListener("blur",()=>{$("p_pump").value=state.pricePump;opValue({type:'setPrice',field:'pricePump',value:state.pricePump});});
-  $("chk_bohle").addEventListener("change",e=>{ if(!e.target.checked&&!state.lanes.schere){e.target.checked=true;toast("Mindestens eine Bahn muss aktiv sein.");return;} opStruct({type:'setLane',lane:'bohle',on:e.target.checked}); });
-  $("chk_schere").addEventListener("change",e=>{ if(!e.target.checked&&!state.lanes.bohle){e.target.checked=true;toast("Mindestens eine Bahn muss aktiv sein.");return;} opStruct({type:'setLane',lane:'schere',on:e.target.checked}); });
+  // ---------- Bahn-Konstellation (1/2 Bahnen, Disziplin je Bahn) ----------
+  function renderLaneControls(){
+    if(!state)return; const bn=activeBahnen(); const n=bn.length;
+    const cnt=$("bahncount"); if(cnt)cnt.querySelectorAll("button").forEach(b=>b.classList.toggle("active",Number(b.dataset.n)===n));
+    const seg2=$("bahn2seg"); if(seg2)seg2.style.display=n===2?"":"none";
+    const cap1=$("bahn1cap"); if(cap1)cap1.textContent=n===1?"Disziplin":"Bahn 1";
+    [0,1].forEach(i=>{ const seg=$("bahn"+(i+1)+"seg"); if(!seg)return;
+      seg.querySelectorAll("button[data-d]").forEach(b=>b.classList.toggle("active",bn[i]===b.dataset.d)); });
+  }
+  function applyBahnen(arr){ // 1-2 Bahnen; Duplikate erlaubt (zwei gleiche Disziplinen möglich)
+    arr=arr.filter(d=>DISC_LABEL[d]).slice(0,2); if(!arr.length)return;
+    state.bahnen=arr; state.lanes={bohle:arr.includes('bohle'),schere:arr.includes('schere')};
+    renderAll(); opStruct({type:'setBahnen',bahnen:arr});
+  }
+  (function wireLaneControls(){
+    const cnt=$("bahncount"); if(cnt)cnt.querySelectorAll("button").forEach(btn=>btn.addEventListener("click",()=>{
+      const bn=activeBahnen(); const want=Number(btn.dataset.n);
+      if(want===bn.length)return;
+      if(want===1) applyBahnen([bn[0]||'bohle']);
+      else { const first=bn[0]||'bohle'; applyBahnen([first,otherDisc(first)]); }
+    }));
+    [0,1].forEach(i=>{ const seg=$("bahn"+(i+1)+"seg"); if(!seg)return;
+      seg.querySelectorAll("button[data-d]").forEach(btn=>btn.addEventListener("click",()=>{
+        const bn=activeBahnen().slice(); const d=btn.dataset.d;
+        if(bn.length===1){ applyBahnen([d]); return; }
+        // Zwei Bahnen: nur die Disziplin DIESER Bahn ändern, die andere bleibt (zwei gleiche erlaubt)
+        bn[i]=d; applyBahnen(bn);
+      })); });
+  })();
 
   function fmtLeft(s){ if(!s)return""; const p=String(s).split("-"); return p.length===3?(p[2]+"."+p[1]+"."+p[0]):s; }
   function addPlayer(){ const name=$("addName").value.trim(); if(!name)return;
@@ -1453,8 +1509,7 @@
     state.players.forEach(p=>{
       const fehlt=[]; let filled=0, lanes=0;
       if(!(p.name||"").trim()) fehlt.push("kein Name");
-      if(state.lanes.bohle){ const a=p.b1!=null,b=p.b2!=null; if(a)filled++; if(b)filled++; if(a&&b)lanes++; if(!a)fehlt.push("Bo 1"); if(!b)fehlt.push("Bo 2"); }
-      if(state.lanes.schere){ const a=p.s1!=null,b=p.s2!=null; if(a)filled++; if(b)filled++; if(a&&b)lanes++; if(!a)fehlt.push("Sc 1"); if(!b)fehlt.push("Sc 2"); }
+      activeBahnen().forEach((d,i)=>{ const m=DISC_LABEL[d]; const lv=rowLane(p,i,d); const a=lv[0]!=null,b=lv[1]!=null; if(a)filled++; if(b)filled++; if(a&&b)lanes++; if(!a)fehlt.push("B"+(i+1)+" "+m.short+" 1"); if(!b)fehlt.push("B"+(i+1)+" "+m.short+" 2"); });
       throwCounts.push(filled);
       const name=(p.name||"(ohne Namen)");
       if(lanes===0) issues.push("• "+name+": keine vollständige Bahn");
@@ -1712,7 +1767,21 @@
     sel.innerHTML=opts; sel.value=String(cur);
     sel.classList.toggle("needsel", cur==="");
   }
-  $("f_place").addEventListener("change",e=>{ const v=e.target.value; state.placeId=v===""?null:Number(v); opValue({type:'setPlace',value:v===""?null:Number(v)}); renderPlaceSelect(); });
+  $("f_place").addEventListener("change",e=>{ const v=e.target.value; const pid=v===""?null:Number(v); state.placeId=pid; opValue({type:'setPlace',value:pid}); renderPlaceSelect(); maybeSuggestBahnen(pid); });
+  // Konstellation vom letzten Mal vorschlagen: nur wenn noch keine Punkte eingetragen sind (nicht-destruktiv).
+  // Primär die zuletzt an diesem Ort gespielte Konstellation, sonst als Rückfall die zuletzt insgesamt gespielte.
+  function sheetHasScores(){ return (state.players||[]).some(p=>['l1a','l1b','l2a','l2b','b1','b2','s1','s2'].some(k=>p[k]!=null)); }
+  function sameBahnen(a,b){ a=a||[]; b=b||[]; return a.length===b.length && a.every((d,i)=>d===b[i]); }
+  function maybeSuggestBahnen(pid){
+    if(!state||sheetHasScores())return;
+    const pl=pid!=null?places.find(p=>p.id===pid):null;
+    const src=(pl&&Array.isArray(pl.lastBahnen)&&pl.lastBahnen.length)?pl.lastBahnen:(Array.isArray(lastBahnen)&&lastBahnen.length?lastBahnen:null);
+    if(!src||!src.length)return;
+    if(sameBahnen(src,activeBahnen()))return;
+    applyBahnen(src.slice());
+    const desc=src.map((d,i)=>'Bahn '+(i+1)+' '+(DISC_LABEL[d]?DISC_LABEL[d].long:d)).join(', ');
+    toast('Konstellation vom letzten Mal übernommen: '+desc+'.');
+  }
   function renderPlaceList(){ const box=$("placeList"); if(!box)return; const manage=!!(me&&effManage());
     if(!places.length){ box.innerHTML='<div class="prizeempty">Noch keine Kegelorte angelegt.</div>'; return; }
     const rows=placesSorted().map(p=>'<tr>'
@@ -2082,13 +2151,12 @@
     h+='<h2 style="margin:.2em 0">'+(esc(g.event)||'Spiel')+'</h2>';
     h+='<div class="detmeta">'+d+(g.place?(' · 📍 '+esc(g.place)):'')+' · gespeichert von '+esc(g.savedBy||'')+(ev.silberNames.length?(' · Ⓢ '+ev.silberNames.map(esc).join(", ")):'')+(ev.pumpenNames.length?(' · Ⓟ '+ev.pumpenNames.map(esc).join(", ")):'')+'</div>';
     h+='<div class="tablewrap"><table><thead><tr><th>Pl.</th><th title="Reihenfolge des Eintreffens">Ank.</th><th style="text-align:left">Name</th><th>9</th><th>⑧</th><th>Pump</th>';
-    if(ev.lanes.bohle)h+='<th class="grp">Bo1</th><th class="grp">Bo2</th><th class="grp">ΣBo</th>';
-    if(ev.lanes.schere)h+='<th class="grp">Sc1</th><th class="grp">Sc2</th><th class="grp">ΣSc</th>';
+    const abn=(Array.isArray(g.bahnen)&&g.bahnen.length)?g.bahnen.filter(d=>DISC_LABEL[d]):['bohle','schere'].filter(d=>ev.lanes[d]);
+    abn.forEach((d,i)=>{ const m=DISC_LABEL[d]; const tt='Bahn '+(i+1)+' – '+m.long; h+='<th class="grp" title="'+tt+'">B'+(i+1)+' '+m.short+'1</th><th class="grp" title="'+tt+'">B'+(i+1)+' '+m.short+'2</th><th class="grp" title="Summe '+tt+'">Σ'+m.short+'</th>'; });
     h+='<th>Σ</th><th>Ⓢ</th><th>Ⓟ</th><th>Kasse</th></tr></thead><tbody>';
     ev.rows.slice().sort((a,b)=>b.total-a.total).forEach(r=>{
       h+='<tr><td><span class="medal '+(r.place===1?'g':r.place===2?'s':r.place===3?'b':'none')+'">'+(r.place||'–')+'</span></td><td class="num">'+(r.idx+1)+'</td><td style="text-align:left;font-weight:700">'+esc(r.name||"(ohne Namen)")+'</td><td>'+r.c9+'</td><td>'+r.cK+'</td><td>'+r.cP+'</td>';
-      if(ev.lanes.bohle)h+='<td>'+(r.b1??'')+'</td><td>'+(r.b2??'')+'</td><td class="lanesum">'+((r.b1||0)+(r.b2||0))+'</td>';
-      if(ev.lanes.schere)h+='<td>'+(r.s1??'')+'</td><td>'+(r.s2??'')+'</td><td class="lanesum">'+((r.s1||0)+(r.s2||0))+'</td>';
+      abn.forEach((d,i)=>{ const lv=rowLane(r,i,d); h+='<td>'+(lv[0]??'')+'</td><td>'+(lv[1]??'')+'</td><td class="lanesum">'+((lv[0]||0)+(lv[1]||0))+'</td>'; });
       h+='<td class="total">'+r.total+'</td><td>'+(r.silber?'<span class="dot" style="background:var(--silver);color:#fff;border-radius:50%;padding:1px 5px">Ⓢ</span>':'')+'</td><td>'+(r.pumpen?'<span class="dot" style="background:var(--lane);color:#fff;border-radius:50%;padding:1px 5px">Ⓟ</span>':'')+'</td><td class="num">'+euro(r.kasse)+'</td></tr>';
     });
     h+='</tbody></table></div>';

@@ -46,11 +46,48 @@ if (!SECRET) {
 }
 
 // ---------- Datenmodell ----------
+// Bahnen-Modell: "bahnen" ist ein geordnetes Array der Disziplinen der physischen
+// Bahnen (Index 0 = Bahn 1, Index 1 = Bahn 2), z. B. ['schere','bohle'] = Bahn 1
+// Schere, Bahn 2 Bohle. Erlaubt sind 1 oder 2 Bahnen; zwei Bahnen dürfen dieselbe
+// Disziplin haben (z. B. zwei Scherenbahnen). Punkte werden je physischer Bahn
+// gespeichert (l1a/l1b = Bahn 1, l2a/l2b = Bahn 2). "lanes" {bohle,schere} bleibt
+// als abgeleiteter Cache (welche Disziplinen vorkommen) für Statistik/Kasse erhalten.
+const DISCIPLINES = ['bohle', 'schere'];
+// Punkte werden je PHYSISCHER Bahn gespeichert (zwei Würfe je Bahn), damit auch zwei
+// Bahnen derselben Disziplin (z. B. zwei Scherenbahnen) möglich sind. Die Disziplin
+// einer Bahn ergibt sich aus dem bahnen-Array (Index 0 = Bahn 1, Index 1 = Bahn 2).
+const LANE_SLOTS = [['l1a', 'l1b'], ['l2a', 'l2b']];
+function rowIsNew(row) { return LANE_SLOTS.some(([a, b]) => Object.prototype.hasOwnProperty.call(row, a) || Object.prototype.hasOwnProperty.call(row, b)); }
+// Rohwerte [wurf1, wurf2] der i-ten Bahn (neues Format) bzw. Altformat je Disziplin
+function rowLane(row, i, disc) { return rowIsNew(row) ? [row[LANE_SLOTS[i][0]], row[LANE_SLOTS[i][1]]] : (disc === 'bohle' ? [row.b1, row.b2] : [row.s1, row.s2]); }
+// Wurfwerte je Disziplin (über alle aktiven Bahnen aggregiert) – Basis für Statistik/Silber/Kasse
+function discScores(row, bahnen) {
+  const out = { bohle: [], schere: [] };
+  if (rowIsNew(row)) { (bahnen || []).forEach((d, i) => { const sl = LANE_SLOTS[i]; if (sl && out[d]) out[d].push(row[sl[0]], row[sl[1]]); }); }
+  else { if ((bahnen || []).includes('bohle')) out.bohle.push(row.b1, row.b2); if ((bahnen || []).includes('schere')) out.schere.push(row.s1, row.s2); }
+  return out;
+}
+function sumVals(a) { return a.reduce((x, v) => x + (v || 0), 0); }
+function resolveBahnen(g) { return normBahnen(g.bahnen, g.lanes); }
+function normBahnen(src, fallbackLanes) {
+  let arr = Array.isArray(src) ? src.filter(d => DISCIPLINES.includes(d)) : null;
+  if (arr) arr = arr.slice(0, 2); // 1-2 Bahnen; Duplikate erlaubt (zwei gleiche Disziplinen möglich)
+  if (!arr || arr.length === 0) {
+    // Migration aus dem alten lanes-Modell (Reihenfolge: Bohle vor Schere)
+    const l = fallbackLanes || {};
+    arr = [];
+    if (l.bohle) arr.push('bohle');
+    if (l.schere) arr.push('schere');
+    if (arr.length === 0) arr = ['bohle'];
+  }
+  return arr;
+}
+function lanesFromBahnen(bahnen) { return { bohle: bahnen.includes('bohle'), schere: bahnen.includes('schere') }; }
 function emptySheet() {
-  return { event: '', date: '', placeId: null, lanes: { bohle: true, schere: false }, priceNK: 1, pricePump: 0.1,
+  return { event: '', date: '', placeId: null, bahnen: ['bohle'], lanes: { bohle: true, schere: false }, priceNK: 1, pricePump: 0.1,
     pumpen: '', note: '', seq: 0, players: [], updatedBy: '', updatedAt: 0 };
 }
-let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, places: [], seqPlaces: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, develop: [], seqDevelop: 0, events: [], seqEvents: 0, polls: [], seqPolls: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
+let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, places: [], seqPlaces: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, develop: [], seqDevelop: 0, events: [], seqEvents: 0, polls: [], seqPolls: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, lastBahnen: null, version: 0 };
 const LOG_MAX = 400;
 
 // ---------- Kegelorte (Spielorte) ----------
@@ -60,10 +97,12 @@ const LOG_MAX = 400;
 // Umbenennungen/Löschungen die historische Statistik nicht verändern.
 const PLACE_NAME_MAX = 80;
 function normPlace(src) {
+  const lb = (src && Array.isArray(src.lastBahnen)) ? normBahnen(src.lastBahnen) : null;
   return {
     id: (src && src.id != null) ? Number(src.id) : null,
     name: String((src && src.name) || '').trim().slice(0, PLACE_NAME_MAX),
-    active: !(src && src.active === false)
+    active: !(src && src.active === false),
+    lastBahnen: lb // zuletzt an diesem Ort gespielte Bahn-Konstellation (Vorschlag), null = keine Historie
   };
 }
 function placeById(id) { if (id == null) return null; const n = Number(id); return db.places.find(p => p.id === n) || null; }
@@ -72,9 +111,20 @@ function placeNameById(id) { const p = placeById(id); return p ? p.name : null; 
 function cint(v, mn, mx, fb) { let n = Math.round(Number(v)); if (!isFinite(n)) return fb; return Math.min(mx, Math.max(mn, n)); }
 function nscore(v) { if (v == null || v === '') return null; return cint(v, 0, MAX, 0); }
 function normPlayer(p) {
-  return { id: p.id, rosterId: (p.rosterId != null ? Number(p.rosterId) : null), name: String(p.name || ''),
-    c9: cint(p.c9, 0, 99999, 0), cK: cint(p.cK != null ? p.cK : p.cS, 0, 99999, 0), cP: cint(p.cP, 0, 99999, 0),
-    b1: nscore(p.b1), b2: nscore(p.b2), s1: nscore(p.s1), s2: nscore(p.s2) };
+  const o = { id: p.id, rosterId: (p.rosterId != null ? Number(p.rosterId) : null), name: String(p.name || ''),
+    c9: cint(p.c9, 0, 99999, 0), cK: cint(p.cK != null ? p.cK : p.cS, 0, 99999, 0), cP: cint(p.cP, 0, 99999, 0) };
+  if (rowIsNew(p)) { o.l1a = nscore(p.l1a); o.l1b = nscore(p.l1b); o.l2a = nscore(p.l2a); o.l2b = nscore(p.l2b); }
+  else { o.b1 = nscore(p.b1); o.b2 = nscore(p.b2); o.s1 = nscore(p.s1); o.s2 = nscore(p.s2); } // Altformat, wird per migrateRow überführt
+  return o;
+}
+// Altformat (b1/b2/s1/s2, je Disziplin) in das neue Bahn-Format (l1a/l1b/l2a/l2b) überführen
+function migrateRow(p, bahnen) {
+  if (rowIsNew(p)) return p;
+  (bahnen || []).forEach((d, i) => { const sl = LANE_SLOTS[i]; if (!sl) return; if (d === 'bohle') { p[sl[0]] = p.b1 != null ? p.b1 : null; p[sl[1]] = p.b2 != null ? p.b2 : null; } else { p[sl[0]] = p.s1 != null ? p.s1 : null; p[sl[1]] = p.s2 != null ? p.s2 : null; } });
+  // fehlende Bahn-Slots (nicht belegte Bahnen) sicher auf null
+  LANE_SLOTS.forEach(([a, b], i) => { if (i >= (bahnen || []).length) { p[a] = null; p[b] = null; } });
+  delete p.b1; delete p.b2; delete p.s1; delete p.s2;
+  return p;
 }
 // ---------- Mitgliedsverzeichnis: Kontaktfelder ----------
 // Zusatzangaben je Stamm-Person (Verzeichnis). Freitext mit Längenbegrenzung;
@@ -254,10 +304,13 @@ function loadDb() {
     db.places = Array.isArray(j.places) ? j.places.map(normPlace).filter(p => p.id != null && p.name) : [];
     db.seqPlaces = j.seqPlaces || db.places.reduce((m, p) => Math.max(m, p.id), 0);
     db.sheet = Object.assign(emptySheet(), j.sheet || {});
-    db.sheet.lanes = Object.assign({ bohle: true, schere: false }, db.sheet.lanes || {});
+    // Bahnen-Konstellation herleiten: bevorzugt aus dem eingelesenen bahnen-Feld,
+    // sonst (Altbestand ohne bahnen) aus lanes ableiten – dann lanes daraus spiegeln.
+    db.sheet.bahnen = normBahnen(j.sheet && j.sheet.bahnen, db.sheet.lanes);
+    db.sheet.lanes = lanesFromBahnen(db.sheet.bahnen);
     // Ort der Live-Liste nur übernehmen, wenn er (noch) existiert
     db.sheet.placeId = (db.sheet.placeId != null && db.places.some(p => p.id === Number(db.sheet.placeId))) ? Number(db.sheet.placeId) : null;
-    db.sheet.players = Array.isArray(db.sheet.players) ? db.sheet.players.map(normPlayer) : [];
+    db.sheet.players = Array.isArray(db.sheet.players) ? db.sheet.players.map(p => migrateRow(normPlayer(p), db.sheet.bahnen)) : [];
     db.archive = Array.isArray(j.archive) ? j.archive : [];
     db.seqArchive = j.seqArchive || db.archive.reduce((m, a) => Math.max(m, a.id), 0);
     db.prizes = Array.isArray(j.prizes) ? j.prizes.map(normPrize).filter(p => p.id != null && p.title) : [];
@@ -284,6 +337,7 @@ function loadDb() {
     db.seqLedger = j.seqLedger || db.ledger.reduce((m, e) => Math.max(m, e.id || 0), 0);
     const cs = j.cashSettings || {};
     db.cashSettings = { duesCent: Number.isFinite(cs.duesCent) ? cs.duesCent : 2000, absenceCent: Number.isFinite(cs.absenceCent) ? cs.absenceCent : 100, expenseCent: Number.isFinite(cs.expenseCent) ? cs.expenseCent : 3500, duesStartMonth: /^\d{4}-\d{2}$/.test(cs.duesStartMonth) ? cs.duesStartMonth : null };
+    db.lastBahnen = Array.isArray(j.lastBahnen) ? normBahnen(j.lastBahnen) : null;
     db.version = j.version || 0;
   } catch (_) { /* Erststart */ seedPrizes(); seedTrips(); seedDevelop(); }
 }
@@ -478,6 +532,7 @@ function describeOp(op, ctx) {
     case 'setNote': return (op.field === 'pumpen' ? 'Pumpenkegel-Notiz' : 'Bemerkung') + ' geändert';
     case 'setPrice': return 'Preis ' + (op.field === 'priceNK' ? '9/Kranz' : 'Pumpe') + ' geändert';
     case 'setLane': return 'Bahn ' + (op.lane === 'bohle' ? 'Bohle' : 'Schere') + (op.on ? ' aktiviert' : ' deaktiviert');
+    case 'setBahnen': return 'Bahnen gesetzt: ' + (op.bahnen || []).map((d, i) => 'Bahn ' + (i + 1) + ' ' + (d === 'bohle' ? 'Bohle' : 'Schere')).join(', ');
     case 'addPlayer': return 'Spieler hinzugefügt: ' + (op.player ? op.player.name : '') + (op.roster ? ' (neu im Stamm)' : '');
     case 'removePlayer': return 'Spieler entfernt: ' + (ctx && ctx.removedName || '');
     case 'setName': return 'Name geändert: ' + op.value;
@@ -556,16 +611,18 @@ setInterval(() => { for (const c of clients) { try { c.res.write(': hb\n\n'); } 
 
 // ---------- Auswertung eines Spiels (Live-Sheet oder Snapshot) ----------
 function evalGame(g) {
-  const lt = p => (g.lanes.bohle ? (p.b1 || 0) + (p.b2 || 0) : 0) + (g.lanes.schere ? (p.s1 || 0) + (p.s2 || 0) : 0);
+  const bahnen = resolveBahnen(g);
   const rows = g.players.map((p, i) => {
-    const scores = [];
-    if (g.lanes.bohle) scores.push(p.b1 || 0, p.b2 || 0);
-    if (g.lanes.schere) scores.push(p.s1 || 0, p.s2 || 0);
+    const ds = discScores(p, bahnen);
+    const bohleArr = ds.bohle.map(v => v || 0), schereArr = ds.schere.map(v => v || 0);
+    const scores = bohleArr.concat(schereArr);
     return { idx: i, rosterId: p.rosterId != null ? p.rosterId : null, name: p.name || '',
-      c9: p.c9 || 0, cK: p.cK || 0, cP: p.cP || 0, b1: p.b1, b2: p.b2, s1: p.s1, s2: p.s2,
-      total: lt(p), bestRound: scores.length ? Math.max.apply(null, scores) : 0,
-      roundBohle: g.lanes.bohle ? Math.max(p.b1 || 0, p.b2 || 0) : null,
-      roundSchere: g.lanes.schere ? Math.max(p.s1 || 0, p.s2 || 0) : null,
+      c9: p.c9 || 0, cK: p.cK || 0, cP: p.cP || 0,
+      // Rohwerte durchreichen (Archiv-Detail/Export): neues Bahn-Format und – falls vorhanden – Altformat
+      l1a: p.l1a, l1b: p.l1b, l2a: p.l2a, l2b: p.l2b, b1: p.b1, b2: p.b2, s1: p.s1, s2: p.s2,
+      total: sumVals(ds.bohle) + sumVals(ds.schere), bestRound: scores.length ? Math.max.apply(null, scores) : 0,
+      roundBohle: bahnen.includes('bohle') ? Math.max.apply(null, [0].concat(bohleArr)) : null,
+      roundSchere: bahnen.includes('schere') ? Math.max.apply(null, [0].concat(schereArr)) : null,
       silber: false, pumpen: false, kasse: 0 };
   });
   // Silberkegel = meiste Punkte
@@ -864,14 +921,14 @@ function buildExportHtml() {
     h += '<p class="sub">gespeichert von ' + escHtml(g.savedBy || '') + ' am ' + escHtml(fmtDT(g.savedAt)) +
       (ev.silberNames.length ? (' · <span class="sil">Ⓢ ' + ev.silberNames.map(escHtml).join(', ') + '</span>') : '') +
       (ev.pumpenNames.length ? (' · <span class="pmp">Ⓟ ' + ev.pumpenNames.map(escHtml).join(', ') + '</span>') : '') + '</p>';
+    const DISC_X = { bohle: { short: 'Bo', long: 'Bohle' }, schere: { short: 'Sc', long: 'Schere' } };
+    const abn = resolveBahnen(g);
     h += '<table><thead><tr><th>Pl.</th><th>Ank.</th><th class="l">Name</th><th>9</th><th>⑧</th><th>Pump</th>';
-    if (ev.lanes.bohle) h += '<th>Bo1</th><th>Bo2</th><th>ΣBo</th>';
-    if (ev.lanes.schere) h += '<th>Sc1</th><th>Sc2</th><th>ΣSc</th>';
+    abn.forEach((d, i) => { const m = DISC_X[d]; h += '<th title="Bahn ' + (i + 1) + ' – ' + m.long + '">B' + (i + 1) + ' ' + m.short + '1</th><th>' + m.short + '2</th><th>Σ' + m.short + '</th>'; });
     h += '<th>Σ</th><th>Ⓢ</th><th>Ⓟ</th><th>Kasse</th></tr></thead><tbody>';
     ev.rows.slice().sort((a, b) => b.total - a.total).forEach(r => {
       h += '<tr><td>' + (r.place || '–') + '</td><td>' + (r.idx + 1) + '</td><td class="l">' + escHtml(r.name || '(ohne Namen)') + '</td><td>' + r.c9 + '</td><td>' + r.cK + '</td><td>' + r.cP + '</td>';
-      if (ev.lanes.bohle) h += '<td>' + (r.b1 == null ? '' : r.b1) + '</td><td>' + (r.b2 == null ? '' : r.b2) + '</td><td>' + ((r.b1 || 0) + (r.b2 || 0)) + '</td>';
-      if (ev.lanes.schere) h += '<td>' + (r.s1 == null ? '' : r.s1) + '</td><td>' + (r.s2 == null ? '' : r.s2) + '</td><td>' + ((r.s1 || 0) + (r.s2 || 0)) + '</td>';
+      abn.forEach((d, i) => { const lv = rowLane(r, i, d); const v1 = lv[0], v2 = lv[1]; h += '<td>' + (v1 == null ? '' : v1) + '</td><td>' + (v2 == null ? '' : v2) + '</td><td>' + ((v1 || 0) + (v2 || 0)) + '</td>'; });
       h += '<td><b>' + r.total + '</b></td><td>' + (r.silber ? 'Ⓢ' : '') + '</td><td>' + (r.pumpen ? 'Ⓟ' : '') + '</td><td class="n">' + escHtml(euroS(r.kasse)) + '</td></tr>';
     });
     h += '</tbody></table>';
@@ -886,8 +943,8 @@ function buildExportHtml() {
 
 // ---------- Operationen (mit Live-Broadcast) ----------
 function findP(id) { return db.sheet.players.find(p => p.id === id); }
-function throwCount(p, lanes) { let n = 0; if (lanes.bohle) { if (p.b1 != null) n++; if (p.b2 != null) n++; } if (lanes.schere) { if (p.s1 != null) n++; if (p.s2 != null) n++; } return n; }
-function throwsUnequal(s) { if (!s.players || s.players.length < 2) return false; return new Set(s.players.map(p => throwCount(p, s.lanes))).size > 1; }
+function throwCount(p, bahnen) { let n = 0; const ds = discScores(p, bahnen); ds.bohle.concat(ds.schere).forEach(v => { if (v != null) n++; }); return n; }
+function throwsUnequal(s) { if (!s.players || s.players.length < 2) return false; const bn = resolveBahnen(s); return new Set(s.players.map(p => throwCount(p, bn))).size > 1; }
 function applyOp(op, user) {
   const s = db.sheet;
   switch (op && op.type) {
@@ -895,7 +952,17 @@ function applyOp(op, user) {
     case 'setPlace': { if (op.value == null || op.value === '') { s.placeId = null; return { type: 'setPlace', value: null }; } const pl = placeById(op.value); if (!pl) return null; s.placeId = pl.id; return { type: 'setPlace', value: pl.id }; }
     case 'setNote': if (!['pumpen', 'note'].includes(op.field)) return null; s[op.field] = String(op.value || '').slice(0, 4000); return { type: 'setNote', field: op.field, value: s[op.field] };
     case 'setPrice': { if (!['priceNK', 'pricePump'].includes(op.field)) return null; let v = Number(op.value); if (!isFinite(v) || v < 0) v = 0; s[op.field] = v; return { type: 'setPrice', field: op.field, value: v }; }
-    case 'setLane': { if (!['bohle', 'schere'].includes(op.lane)) return null; const nx = Object.assign({}, s.lanes); nx[op.lane] = !!op.on; if (!nx.bohle && !nx.schere) return null; s.lanes = nx; return { type: 'setLane', lane: op.lane, on: !!op.on }; }
+    case 'setLane': { if (!['bohle', 'schere'].includes(op.lane)) return null; const nx = Object.assign({}, s.lanes); nx[op.lane] = !!op.on; if (!nx.bohle && !nx.schere) return null; s.lanes = nx;
+      // bahnen synchron halten: bestehende Reihenfolge behalten, neu aktivierte Disziplin hinten anfügen
+      let bn = (s.bahnen || []).filter(d => nx[d]); DISCIPLINES.forEach(d => { if (nx[d] && !bn.includes(d)) bn.push(d); }); s.bahnen = bn;
+      return { type: 'setLane', lane: op.lane, on: !!op.on }; }
+    case 'setBahnen': {
+      let arr = Array.isArray(op.bahnen) ? op.bahnen.filter(d => DISCIPLINES.includes(d)) : [];
+      arr = arr.slice(0, 2); // 1-2 Bahnen; Duplikate erlaubt (zwei gleiche Disziplinen möglich)
+      if (arr.length === 0) return null;
+      s.bahnen = arr; s.lanes = lanesFromBahnen(arr);
+      return { type: 'setBahnen', bahnen: arr, lanes: s.lanes };
+    }
     case 'addPlayer': {
       let person = null, newPerson = null;
       if (op.rosterId != null) {
@@ -910,7 +977,7 @@ function applyOp(op, user) {
           person = Object.assign({ id: ++db.seqRoster, name: nm.slice(0, 60), active: true, duesLiable: true }, emptyContact()); db.roster.push(person); newPerson = person;
         }
       }
-      const p = { id: ++s.seq, rosterId: person.id, name: person.name, c9: 0, cK: 0, cP: 0, b1: null, b2: null, s1: null, s2: null };
+      const p = { id: ++s.seq, rosterId: person.id, name: person.name, c9: 0, cK: 0, cP: 0, l1a: null, l1b: null, l2a: null, l2b: null };
       s.players.push(p);
       return { type: 'addPlayer', player: p, roster: newPerson };
     }
@@ -918,7 +985,7 @@ function applyOp(op, user) {
     case 'setName': { const p = findP(op.id); if (!p) return null; p.name = String(op.value || '').slice(0, 60); return { type: 'setName', id: op.id, value: p.name }; }
     case 'counterDelta': { if (!['c9', 'cK', 'cP'].includes(op.key)) return null; const p = findP(op.id); if (!p) return null; const old = p[op.key] || 0; p[op.key] = Math.max(0, Math.min(99999, old + (Math.sign(op.delta) || 0))); return { type: 'counterDelta', id: op.id, key: op.key, delta: p[op.key] - old }; }
     case 'setCounter': { if (!['c9', 'cK', 'cP'].includes(op.key)) return null; const p = findP(op.id); if (!p) return null; p[op.key] = cint(op.value, 0, 99999, 0); return { type: 'setCounter', id: op.id, key: op.key, value: p[op.key] }; }
-    case 'setScore': { if (!['b1', 'b2', 's1', 's2'].includes(op.key)) return null; const p = findP(op.id); if (!p) return null; p[op.key] = nscore(op.value); return { type: 'setScore', id: op.id, key: op.key, value: p[op.key] }; }
+    case 'setScore': { if (!['l1a', 'l1b', 'l2a', 'l2b'].includes(op.key)) return null; const p = findP(op.id); if (!p) return null; p[op.key] = nscore(op.value); return { type: 'setScore', id: op.id, key: op.key, value: p[op.key] }; }
     case 'sortByPlace': return null; // Sortierung ist reine Anzeige (clientseitig); Ankunftsreihenfolge bleibt erhalten
     case 'reset': { if (!canManage(user.role)) return null; s.players = []; s.seq = 0; return { type: 'reset' }; }
     case 'newGame': { s.players = []; s.seq = 0; s.event = ''; s.pumpen = ''; s.note = ''; return { type: 'newGame' }; }
@@ -944,10 +1011,13 @@ function applyOp(op, user) {
       // Harter Block: ohne gültigen Kegelort wird nicht archiviert
       const gp = placeById(s.placeId); if (!gp) return null;
       const snap = { id: ++db.seqArchive, savedAt: Date.now(), savedBy: user.username,
-        event: s.event, date: s.date, placeId: gp.id, placeName: gp.name, lanes: { bohle: s.lanes.bohle, schere: s.lanes.schere },
+        event: s.event, date: s.date, placeId: gp.id, placeName: gp.name, bahnen: (s.bahnen || []).slice(), lanes: { bohle: s.lanes.bohle, schere: s.lanes.schere },
         priceNK: s.priceNK, pricePump: s.pricePump, pumpen: s.pumpen, note: s.note,
-        players: s.players.map(p => ({ rosterId: p.rosterId != null ? p.rosterId : null, name: p.name, c9: p.c9 || 0, cK: p.cK || 0, cP: p.cP || 0, b1: p.b1, b2: p.b2, s1: p.s1, s2: p.s2 })) };
+        players: s.players.map(p => ({ rosterId: p.rosterId != null ? p.rosterId : null, name: p.name, c9: p.c9 || 0, cK: p.cK || 0, cP: p.cP || 0, l1a: p.l1a, l1b: p.l1b, l2a: p.l2a, l2b: p.l2b })) };
       db.archive.push(snap);
+      // Konstellation für Vorschläge merken: je Kegelort und global (zuletzt gespielt)
+      gp.lastBahnen = (s.bahnen || []).slice();
+      db.lastBahnen = (s.bahnen || []).slice();
       // Spielabrechnung automatisch dem Kassenkonto der Personen belasten
       const ev = evalGame(snap);
       ev.rows.forEach(r => { if (r.rosterId != null && r.kasse > 0) addLedger('game', r.rosterId, Math.round(r.kasse * 100), 'Spielabrechnung ' + (snap.date || todayStr()) + (snap.event ? ' · ' + snap.event : ''), user.username, snap.date || todayStr(), { archiveId: snap.id }); });
@@ -1284,7 +1354,7 @@ function handle(req, res) {
     catch (e) { return send(res, 400, { error: 'Daten zu lang für QR' }); }
   }
   if (api === '/logout' && req.method === 'POST') { clearSessionCookie(res); return send(res, 200, { ok: true }); }
-  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, places: db.places, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView), me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
+  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, places: db.places, lastBahnen: db.lastBahnen, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView), me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
   if (api === '/roster' && req.method === 'GET') return send(res, 200, { roster: db.roster });
   if (api === '/archive' && req.method === 'GET') return send(res, 200, { archive: db.archive.map(archiveMeta).sort((a, b) => b.savedAt - a.savedAt) });
   if (api === '/export' && req.method === 'GET') {
@@ -1310,7 +1380,7 @@ function handle(req, res) {
   if (api === '/events' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.write('retry: 3000\n\n');
-    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, places: db.places, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView) }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, places: db.places, lastBahnen: db.lastBahnen, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView) }) + '\n\n');
     const c = { res, uid: me.id }; clients.add(c); req.on('close', () => clients.delete(c)); return;
   }
 
