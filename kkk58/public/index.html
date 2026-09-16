@@ -363,10 +363,42 @@
   </div>
 </div>
 
-<!-- MATRIX-LOGIN EINRICHTEN -->
+<!-- KONTO -->
 <div id="mxdlg" class="ovl hidden">
   <div class="login">
     <div class="eyebrow">Konto</div>
+    <h1>Konto</h1>
+
+    <p class="mxintro" style="margin:0 0 10px">Verknüpfe deinen persönlichen KKk58-Bot-Chat, um dir künftig einen Login-Link (5 Minuten gültig) statt eines Passworts schicken zu lassen.</p>
+    <button id="mx_open" type="button" class="btn ghost" style="width:100%">Matrix-Login</button>
+
+    <button id="pw_open" type="button" class="btn ghost" style="width:100%;margin-top:8px">Passwort ändern</button>
+
+    <button id="mx_close" type="button" class="btn ghost" style="width:100%;margin-top:12px">Schließen</button>
+  </div>
+</div>
+
+<!-- PASSWORT ÄNDERN (Unterseite von „Konto") -->
+<div id="pwpage" class="ovl hidden">
+  <div class="login">
+    <div class="eyebrow">Konto · Passwort</div>
+    <h1>Passwort ändern</h1>
+    <label for="cpw_cur">Aktuelles Passwort</label>
+    <input id="cpw_cur" type="password" autocomplete="current-password">
+    <label for="cpw_new">Neues Passwort</label>
+    <input id="cpw_new" type="password" autocomplete="new-password">
+    <label for="cpw_new2">Wiederholen</label>
+    <input id="cpw_new2" type="password" autocomplete="new-password">
+    <button id="cpw_btn" type="button" style="margin-top:10px">Passwort ändern</button>
+    <div id="cpw_err" class="err"></div>
+    <button id="pw_back" type="button" class="btn ghost" style="width:100%;margin-top:12px">Zurück</button>
+  </div>
+</div>
+
+<!-- MATRIX-LOGIN EINRICHTEN (Unterseite von „Konto") -->
+<div id="mxlink" class="ovl hidden">
+  <div class="login">
+    <div class="eyebrow">Konto · Matrix-Login</div>
     <h1>Matrix-Login</h1>
     <p class="mxintro">Verknüpfe deinen persönlichen KKk58-Bot-Chat, um dir künftig einen Login-Link (5 Minuten gültig) statt eines Passworts schicken zu lassen.</p>
     <div id="mx_status" class="mxstatus"></div>
@@ -393,7 +425,8 @@
 
     <button id="mx_unlink" type="button" class="btn warn hidden" style="width:100%;margin-top:10px">Verknüpfung entfernen</button>
     <div id="mx_err" class="err"></div>
-    <button id="mx_close" type="button" class="btn ghost" style="width:100%;margin-top:12px">Schließen</button>
+
+    <button id="mx_back" type="button" class="btn ghost" style="width:100%;margin-top:12px">Zurück</button>
   </div>
 </div>
 
@@ -912,8 +945,29 @@
     if(st&&st.mxid&&!$("mx_mxid").value) $("mx_mxid").value=st.mxid;
     $("mx_verifybox").classList.toggle("hidden", !(st&&st.pending));
   }
-  function openMatrixDialog(){ if(!me) return; $("mxdlg").classList.remove("hidden"); $("mx_code").value=""; renderMatrixDialog(); }
+  function openMatrixDialog(){ if(!me) return; $("mxlink").classList.add("hidden"); $("pwpage").classList.add("hidden"); $("mxdlg").classList.remove("hidden"); }
   function closeMatrixDialog(){ $("mxdlg").classList.add("hidden"); }
+  function openMatrixLink(){ if(!me) return; $("mxdlg").classList.add("hidden"); $("mxlink").classList.remove("hidden"); $("mx_code").value=""; $("mx_err").textContent=""; renderMatrixDialog(); }
+  function openPwPage(){ if(!me) return; $("mxdlg").classList.add("hidden"); $("pwpage").classList.remove("hidden"); $("cpw_cur").value=""; $("cpw_new").value=""; $("cpw_new2").value=""; $("cpw_err").textContent=""; setTimeout(()=>$("cpw_cur").focus(),60); }
+  function backToAccount(){ $("mxlink").classList.add("hidden"); $("pwpage").classList.add("hidden"); $("mxdlg").classList.remove("hidden"); }
+  $("mx_open").addEventListener("click",openMatrixLink);
+  $("mx_back").addEventListener("click",backToAccount);
+  $("pw_open").addEventListener("click",openPwPage);
+  $("pw_back").addEventListener("click",backToAccount);
+  async function submitChangePw(){
+    $("cpw_err").textContent="";
+    const cur=$("cpw_cur").value, a=$("cpw_new").value, b=$("cpw_new2").value;
+    if(!cur){ $("cpw_err").textContent="Aktuelles Passwort eingeben"; return; }
+    if(a.length<6){ $("cpw_err").textContent="Neues Passwort mind. 6 Zeichen"; return; }
+    if(a!==b){ $("cpw_err").textContent="Passwörter stimmen nicht überein"; return; }
+    $("cpw_btn").disabled=true;
+    const r=await api('/me/password',{method:'POST',body:{currentPassword:cur,newPassword:a}});
+    $("cpw_btn").disabled=false;
+    if(r.ok){ $("cpw_cur").value=""; $("cpw_new").value=""; $("cpw_new2").value=""; if(me)me.mustChangePassword=false; toast("Passwort geändert"); }
+    else $("cpw_err").textContent=(r.data&&r.data.error)||"Fehler";
+  }
+  $("cpw_btn").addEventListener("click",submitChangePw);
+  $("cpw_new2").addEventListener("keydown",e=>{if(e.key==='Enter')submitChangePw();});
   $("mx_close").addEventListener("click",closeMatrixDialog);
   $("whoName").addEventListener("click",openMatrixDialog);
   $("mx_reqcode").addEventListener("click",async()=>{
