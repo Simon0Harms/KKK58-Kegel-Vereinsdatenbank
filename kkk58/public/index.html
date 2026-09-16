@@ -1864,27 +1864,40 @@
   }
 
   // ---------- Statistik ----------
-  let statsData=null, statsRankMode='avg';
-  async function loadStats(){ const r=await api('/stats'); const box=$("statsBody");
+  let statsData=null, statsRankMode='avg', statsYear=null;
+  async function loadStats(){ const box=$("statsBody");
+    const r=await api('/stats'+(statsYear!=null?('?year='+statsYear):''));
     if(!r.ok){ box.innerHTML='<div class="arcempty">Konnte Statistik nicht laden.</div>'; statsData=null; return; }
-    statsData=r.data; renderStats(); }
+    statsData=r.data;
+    // Gewähltes Jahr nicht mehr vorhanden (z. B. Spiel gelöscht) -> zurück auf Alle
+    if(statsYear!=null && Array.isArray(statsData.years) && !statsData.years.includes(statsYear)){ statsYear=null; return loadStats(); }
+    renderStats(); }
   function setRank(m){ statsRankMode=m; renderStats(); }
+  function setStatsYear(y){ if(statsYear===y)return; statsYear=y; loadStats(); }
   function renderStats(){ const box=$("statsBody"); if(!statsData)return; const {summary,players}=statsData;
-    if(!players.length){ box.innerHTML='<div class="arcempty">Noch keine Statistik – erst Spiele im Archiv speichern.</div>'; return; }
+    const years=Array.isArray(statsData.years)?statsData.years:[];
+    // Jahresumschalter nur zeigen, wenn Spiele aus mehr als einem Jahr vorliegen
+    const yearBar=years.length>1?('<div class="controls" style="margin-bottom:8px"><div class="sortpick" style="margin-left:0"><span class="sortlbl">Zeitraum:</span><div class="seg">'+
+       '<button id="year_all" type="button" class="'+(statsYear==null?'active':'')+'">All-Time</button>'+
+       years.map(y=>'<button type="button" data-year="'+y+'" class="'+(statsYear===y?'active':'')+'">'+y+'</button>').join('')+
+       '</div></div></div>'):'';
+    const bindYears=()=>{ const ab=$("year_all"); if(ab)ab.addEventListener("click",()=>setStatsYear(null)); box.querySelectorAll('button[data-year]').forEach(b=>b.addEventListener("click",()=>setStatsYear(Number(b.getAttribute("data-year"))))); };
+    if(!players.length){ box.innerHTML=yearBar+'<div class="arcempty">'+(statsYear!=null?('Keine Spiele im Jahr '+statsYear+'.'):'Noch keine Statistik – erst Spiele im Archiv speichern.')+'</div>'; bindYears(); return; }
     const span=(summary.from&&summary.to)?(new Date(summary.from).toLocaleDateString("de-DE")+' – '+new Date(summary.to).toLocaleDateString("de-DE")):'';
     const mode=statsRankMode;
     const val=p=> mode==='best'? p.best : p.avg;
     const sorted=players.slice().sort((x,y)=> val(y)-val(x) || (mode==='best'? (y.avg-x.avg):(y.best-x.best)) || y.games-x.games);
     let rank=0,prev=null; sorted.forEach((p,i)=>{ const v=val(p); if(prev===null||v!==prev){rank=i+1;prev=v;} p._rank=rank; });
     const mk=(active,txt)=> active?(txt+' ▼'):txt;
-    let h='<div class="statsum"><div><b>'+summary.games+'</b> Spiele</div>'+(span?('<div>'+span+'</div>'):'')+'<div>Kasse gesamt: <b>'+euro(summary.kasse)+'</b></div><div><b>'+players.length+'</b> Spieler</div></div>';
+    let h=yearBar+'<div class="statsum">'+(statsYear!=null?('<div>Jahr <b>'+statsYear+'</b></div>'):'')+'<div><b>'+summary.games+'</b> Spiele</div>'+(span?('<div>'+span+'</div>'):'')+'<div>Kasse gesamt: <b>'+euro(summary.kasse)+'</b></div><div><b>'+players.length+'</b> Spieler</div></div>';
     h+='<div class="controls" style="margin-bottom:8px"><div class="sortpick" style="margin-left:0"><span class="sortlbl">Rangliste:</span><div class="seg">'+
        '<button id="rank_avg" type="button" class="'+(mode==='avg'?'active':'')+'">Ø Punkte</button>'+
        '<button id="rank_best" type="button" class="'+(mode==='best'?'active':'')+'">Beste</button></div></div></div>';
-    h+='<div class="stblwrap"><table class="stbl"><thead><tr><th>#</th><th class="pn">Spieler</th><th>Sp.</th><th>'+mk(mode==='avg','Ø Pkt')+'</th><th>'+mk(mode==='best','Best')+'</th><th title="Bester Einzelwurf auf der Bohlenbahn">Beste Bo</th><th title="Bester Einzelwurf auf der Scherenbahn">Beste Sc</th><th>9</th><th>⑧</th><th>Pump</th><th>Ⓢ</th><th>Ⓟ</th><th>Siege</th><th title="Durchschnittliche Ankunftsposition (1 = zuerst)">Ø Ank.</th><th title="Wie oft als Erster eingetroffen">1. da</th><th>Kasse</th></tr></thead><tbody>';
-    sorted.forEach(p=>{ h+='<tr><td>'+p._rank+'</td><td class="pn">'+esc(p.name||"(ohne Namen)")+'</td><td>'+p.games+'</td><td>'+p.avg.toFixed(1).replace(".",",")+'</td><td>'+p.best+'</td><td>'+(p.bestBohle==null?"–":p.bestBohle)+'</td><td>'+(p.bestSchere==null?"–":p.bestSchere)+'</td><td>'+p.c9+'</td><td>'+p.cK+'</td><td>'+p.cP+'</td><td>'+p.silber+'</td><td>'+p.pumpen+'</td><td>'+p.wins+'</td><td>'+(p.arrAvg?p.arrAvg.toFixed(1).replace(".",","):"–")+'</td><td>'+(p.firsts||0)+'</td><td class="num">'+euro(p.kasse)+'</td></tr>'; });
-    h+='</tbody></table></div><p class="foot" style="text-align:left">Rangliste umschaltbar nach Ø Punkten oder bestem Gesamtergebnis · Beste Bo/Sc = bester Einzelwurf je Bahn (– = nie gespielt) · Ⓢ/Ⓟ = Silber-/Pumpenkegel-Siege · Siege = 1. Platz · Ø Ank. = durchschnittliche Ankunftsposition (1 = zuerst da) · 1. da = wie oft zuerst eingetroffen.</p>';
+    h+='<div class="stblwrap"><table class="stbl"><thead><tr><th>#</th><th class="pn">Spieler</th><th>Sp.</th><th>'+mk(mode==='avg','Ø Pkt')+'</th><th>'+mk(mode==='best','Best')+'</th><th title="Bester Einzelwurf auf der Bohlenbahn">Beste Bo</th><th title="Bester Einzelwurf auf der Scherenbahn">Beste Sc</th><th>9</th><th>⑧</th><th>Pump</th><th title="Durchschnittliche Pumpen pro Spiel">Ø Pump</th><th>Ⓢ</th><th>Ⓟ</th><th>Siege</th><th title="Durchschnittliche Ankunftsposition (1 = zuerst)">Ø Ank.</th><th title="Wie oft als Erster eingetroffen">1. da</th><th>Kasse</th></tr></thead><tbody>';
+    sorted.forEach(p=>{ h+='<tr><td>'+p._rank+'</td><td class="pn">'+esc(p.name||"(ohne Namen)")+'</td><td>'+p.games+'</td><td>'+p.avg.toFixed(1).replace(".",",")+'</td><td>'+p.best+'</td><td>'+(p.bestBohle==null?"–":p.bestBohle)+'</td><td>'+(p.bestSchere==null?"–":p.bestSchere)+'</td><td>'+p.c9+'</td><td>'+p.cK+'</td><td>'+p.cP+'</td><td>'+((p.pumpAvg!=null?p.pumpAvg:0).toFixed(1).replace(".",","))+'</td><td>'+p.silber+'</td><td>'+p.pumpen+'</td><td>'+p.wins+'</td><td>'+(p.arrAvg?p.arrAvg.toFixed(1).replace(".",","):"–")+'</td><td>'+(p.firsts||0)+'</td><td class="num">'+euro(p.kasse)+'</td></tr>'; });
+    h+='</tbody></table></div><p class="foot" style="text-align:left">Rangliste umschaltbar nach Ø Punkten oder bestem Gesamtergebnis · Beste Bo/Sc = bester Einzelwurf je Bahn (– = nie gespielt) · Ø Pump = durchschnittliche Pumpen pro Spiel · Ⓢ/Ⓟ = Silber-/Pumpenkegel-Siege · Siege = 1. Platz · Ø Ank. = durchschnittliche Ankunftsposition (1 = zuerst da) · 1. da = wie oft zuerst eingetroffen.'+(years.length>1?' · Zeitraum umschaltbar zwischen All-Time und einzelnen Jahren.':'')+'</p>';
     box.innerHTML=h;
+    bindYears();
     $("rank_avg").addEventListener("click",()=>setRank('avg'));
     $("rank_best").addEventListener("click",()=>setRank('best'));
   }

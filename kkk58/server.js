@@ -574,10 +574,17 @@ function archiveMeta(a) {
 
 // ---------- Statistik über alle archivierten Spiele ----------
 function groupKey(r) { return r.rosterId != null ? 'r' + r.rosterId : 'n:' + (r.name || '').trim().toLowerCase(); }
-function computeStats() {
+// Jahr eines Spiels: bevorzugt das Spiel-Datum (YYYY-MM-DD), sonst der Speicherzeitpunkt
+function gameYear(g) { const m = /^(\d{4})-\d{2}-\d{2}/.exec(String(g && g.date || '')); return m ? Number(m[1]) : new Date(g.savedAt).getFullYear(); }
+// Liste aller Jahre mit archivierten Spielen (absteigend)
+function archiveYears() { const s = new Set(); for (const g of db.archive) s.add(gameYear(g)); return Array.from(s).sort((a, b) => b - a); }
+// year = null/undefined -> alle Spiele; sonst nur Spiele des angegebenen Jahres
+function computeStats(year) {
   const agg = new Map();
-  let kasse = 0, from = null, to = null;
+  let kasse = 0, from = null, to = null, games = 0;
   for (const g of db.archive) {
+    if (year != null && gameYear(g) !== year) continue;
+    games++;
     if (from == null || g.savedAt < from) from = g.savedAt;
     if (to == null || g.savedAt > to) to = g.savedAt;
     const ev = evalGame(g); kasse += ev.kasseTotal;
@@ -598,9 +605,9 @@ function computeStats() {
       if (rp) a.name = rp.name;
     }
   }
-  const players = Array.from(agg.values()).map(a => Object.assign(a, { avg: a.games ? a.points / a.games : 0, arrAvg: a.games ? a.arrSum / a.games : 0 }))
+  const players = Array.from(agg.values()).map(a => Object.assign(a, { avg: a.games ? a.points / a.games : 0, arrAvg: a.games ? a.arrSum / a.games : 0, pumpAvg: a.games ? a.cP / a.games : 0 }))
     .sort((x, y) => y.avg - x.avg || y.games - x.games);
-  return { summary: { games: db.archive.length, from, to, kasse }, players };
+  return { summary: { games, from, to, kasse, year: year != null ? year : null }, years: archiveYears(), players };
 }
 
 // ---------- HTML-Export aller archivierten Spiele ----------
@@ -792,12 +799,18 @@ function buildExportHtml() {
   h += '<h1>KKk58 – Vereinsarchiv</h1>';
   h += '<p class="meta">Export vom ' + escHtml(now) + ' · ' + st.summary.games + ' Spiel' + (st.summary.games === 1 ? '' : 'e') + (span ? (' · Zeitraum ' + escHtml(span)) : '') + ' · Gesamtkasse ' + escHtml(euroS(st.summary.kasse)) + '</p>';
 
-  if (st.players.length) {
-    h += '<h2>Gesamtstatistik</h2><table><thead><tr><th class="l">Spieler</th><th>Sp.</th><th>Ø Pkt</th><th>Best</th><th>Beste Bo</th><th>Beste Sc</th><th>9</th><th>⑧</th><th>Pump</th><th>Ⓢ</th><th>Ⓟ</th><th>Siege</th><th>Ø Ank.</th><th>1. da</th><th>Kasse</th></tr></thead><tbody>';
-    st.players.forEach(p => {
-      h += '<tr><td class="l">' + escHtml(p.name || '(ohne Namen)') + '</td><td>' + p.games + '</td><td>' + p.avg.toFixed(1).replace('.', ',') + '</td><td>' + p.best + '</td><td>' + (p.bestBohle == null ? '–' : p.bestBohle) + '</td><td>' + (p.bestSchere == null ? '–' : p.bestSchere) + '</td><td>' + p.c9 + '</td><td>' + p.cK + '</td><td>' + p.cP + '</td><td>' + p.silber + '</td><td>' + p.pumpen + '</td><td>' + p.wins + '</td><td>' + (p.arrAvg ? p.arrAvg.toFixed(1).replace('.', ',') : '–') + '</td><td>' + (p.firsts || 0) + '</td><td class="n">' + escHtml(euroS(p.kasse)) + '</td></tr>';
+  const statsTable = s => {
+    let t = '<table><thead><tr><th class="l">Spieler</th><th>Sp.</th><th>Ø Pkt</th><th>Best</th><th>Beste Bo</th><th>Beste Sc</th><th>9</th><th>⑧</th><th>Pump</th><th>Ø Pump</th><th>Ⓢ</th><th>Ⓟ</th><th>Siege</th><th>Ø Ank.</th><th>1. da</th><th>Kasse</th></tr></thead><tbody>';
+    s.players.forEach(p => {
+      t += '<tr><td class="l">' + escHtml(p.name || '(ohne Namen)') + '</td><td>' + p.games + '</td><td>' + p.avg.toFixed(1).replace('.', ',') + '</td><td>' + p.best + '</td><td>' + (p.bestBohle == null ? '–' : p.bestBohle) + '</td><td>' + (p.bestSchere == null ? '–' : p.bestSchere) + '</td><td>' + p.c9 + '</td><td>' + p.cK + '</td><td>' + p.cP + '</td><td>' + (p.pumpAvg || 0).toFixed(1).replace('.', ',') + '</td><td>' + p.silber + '</td><td>' + p.pumpen + '</td><td>' + p.wins + '</td><td>' + (p.arrAvg ? p.arrAvg.toFixed(1).replace('.', ',') : '–') + '</td><td>' + (p.firsts || 0) + '</td><td class="n">' + escHtml(euroS(p.kasse)) + '</td></tr>';
     });
-    h += '</tbody></table>';
+    return t + '</tbody></table>';
+  };
+  if (st.players.length) {
+    h += '<h2>Gesamtstatistik (All-Time)</h2>' + statsTable(st);
+    // Jahresstatistik zusätzlich, wenn Spiele aus mehr als einem Jahr vorliegen
+    const years = st.years || [];
+    if (years.length > 1) years.forEach(y => { const sy = computeStats(y); if (sy.players.length) h += '<h2>Jahresstatistik ' + y + ' (' + sy.summary.games + ' Spiel' + (sy.summary.games === 1 ? '' : 'e') + ')</h2>' + statsTable(sy); });
   }
 
   h += '<h2>Spiele (' + games.length + ')</h2>';
@@ -1214,7 +1227,7 @@ function handle(req, res) {
 
   const mA = api.match(/^\/archive\/(\d+)$/);
   if (mA && req.method === 'GET') { const g = db.archive.find(a => a.id === Number(mA[1])); if (!g) return send(res, 404, { error: 'nicht gefunden' }); return send(res, 200, { game: { id: g.id, event: g.event, date: g.date, savedAt: g.savedAt, savedBy: g.savedBy, pumpen: g.pumpen, note: g.note }, eval: evalGame(g) }); }
-  if (api === '/stats' && req.method === 'GET') return send(res, 200, computeStats());
+  if (api === '/stats' && req.method === 'GET') { const yq = u.searchParams.get('year'); const yr = /^\d{4}$/.test(String(yq || '')) ? Number(yq) : null; return send(res, 200, computeStats(yr)); }
 
   if (api === '/events' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
