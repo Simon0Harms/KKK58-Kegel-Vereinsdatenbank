@@ -47,11 +47,27 @@ if (!SECRET) {
 
 // ---------- Datenmodell ----------
 function emptySheet() {
-  return { event: '', date: '', lanes: { bohle: true, schere: false }, priceNK: 1, pricePump: 0.1,
+  return { event: '', date: '', placeId: null, lanes: { bohle: true, schere: false }, priceNK: 1, pricePump: 0.1,
     pumpen: '', note: '', seq: 0, players: [], updatedBy: '', updatedAt: 0 };
 }
-let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, develop: [], seqDevelop: 0, events: [], seqEvents: 0, polls: [], seqPolls: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
+let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, places: [], seqPlaces: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, develop: [], seqDevelop: 0, events: [], seqEvents: 0, polls: [], seqPolls: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, version: 0 };
 const LOG_MAX = 400;
+
+// ---------- Kegelorte (Spielorte) ----------
+// Ein Kegelort: id, Name (Pflicht, eindeutig ohne Groß-/Kleinschreibung), active.
+// Jede Anschreibliste MUSS beim Archivieren einem Ort zugeordnet sein (harter Block);
+// im Archiv wird zusätzlich der Name als Snapshot mitgespeichert, damit spätere
+// Umbenennungen/Löschungen die historische Statistik nicht verändern.
+const PLACE_NAME_MAX = 80;
+function normPlace(src) {
+  return {
+    id: (src && src.id != null) ? Number(src.id) : null,
+    name: String((src && src.name) || '').trim().slice(0, PLACE_NAME_MAX),
+    active: !(src && src.active === false)
+  };
+}
+function placeById(id) { if (id == null) return null; const n = Number(id); return db.places.find(p => p.id === n) || null; }
+function placeNameById(id) { const p = placeById(id); return p ? p.name : null; }
 
 function cint(v, mn, mx, fb) { let n = Math.round(Number(v)); if (!isFinite(n)) return fb; return Math.min(mx, Math.max(mn, n)); }
 function nscore(v) { if (v == null || v === '') return null; return cint(v, 0, MAX, 0); }
@@ -235,8 +251,12 @@ function loadDb() {
     db.seqUser = j.seqUser || db.users.length;
     db.roster = Array.isArray(j.roster) ? j.roster.map(r => Object.assign({ id: r.id, name: String(r.name || ''), active: r.active !== false, leftAt: (r.leftAt && /^\d{4}-\d{2}-\d{2}$/.test(r.leftAt)) ? r.leftAt : null, duesLiable: r.duesLiable !== false }, normContact(r))) : [];
     db.seqRoster = j.seqRoster || db.roster.reduce((m, r) => Math.max(m, r.id), 0);
+    db.places = Array.isArray(j.places) ? j.places.map(normPlace).filter(p => p.id != null && p.name) : [];
+    db.seqPlaces = j.seqPlaces || db.places.reduce((m, p) => Math.max(m, p.id), 0);
     db.sheet = Object.assign(emptySheet(), j.sheet || {});
     db.sheet.lanes = Object.assign({ bohle: true, schere: false }, db.sheet.lanes || {});
+    // Ort der Live-Liste nur übernehmen, wenn er (noch) existiert
+    db.sheet.placeId = (db.sheet.placeId != null && db.places.some(p => p.id === Number(db.sheet.placeId))) ? Number(db.sheet.placeId) : null;
     db.sheet.players = Array.isArray(db.sheet.players) ? db.sheet.players.map(normPlayer) : [];
     db.archive = Array.isArray(j.archive) ? j.archive : [];
     db.seqArchive = j.seqArchive || db.archive.reduce((m, a) => Math.max(m, a.id), 0);
@@ -450,6 +470,11 @@ function pNameById(id) { const p = db.sheet.players.find(x => x.id === id); retu
 function describeOp(op, ctx) {
   switch (op.type) {
     case 'setMeta': return (op.field === 'event' ? 'Anlass' : 'Datum') + ' geändert';
+    case 'setPlace': return 'Kegelort ' + (op.value == null ? 'entfernt' : ('gesetzt: ' + (placeNameById(op.value) || '#' + op.value)));
+    case 'addPlace': return 'Kegelort angelegt: ' + (op.place ? op.place.name : '');
+    case 'renamePlace': return 'Kegelort umbenannt in ' + op.name;
+    case 'setPlaceActive': return 'Kegelort ' + (op.active ? 'aktiviert' : 'deaktiviert');
+    case 'removePlace': return 'Kegelort gelöscht';
     case 'setNote': return (op.field === 'pumpen' ? 'Pumpenkegel-Notiz' : 'Bemerkung') + ' geändert';
     case 'setPrice': return 'Preis ' + (op.field === 'priceNK' ? '9/Kranz' : 'Pumpe') + ' geändert';
     case 'setLane': return 'Bahn ' + (op.lane === 'bohle' ? 'Bohle' : 'Schere') + (op.on ? ' aktiviert' : ' deaktiviert');
@@ -569,6 +594,7 @@ function evalGame(g) {
 function archiveMeta(a) {
   const e = evalGame(a);
   return { id: a.id, event: a.event, date: a.date, savedAt: a.savedAt, savedBy: a.savedBy,
+    placeId: a.placeId != null ? a.placeId : null, place: a.placeName || placeNameById(a.placeId) || '',
     players: a.players.length, silberNames: e.silberNames, pumpenNames: e.pumpenNames, kasseTotal: e.kasseTotal };
 }
 
@@ -578,12 +604,27 @@ function groupKey(r) { return r.rosterId != null ? 'r' + r.rosterId : 'n:' + (r.
 function gameYear(g) { const m = /^(\d{4})-\d{2}-\d{2}/.exec(String(g && g.date || '')); return m ? Number(m[1]) : new Date(g.savedAt).getFullYear(); }
 // Liste aller Jahre mit archivierten Spielen (absteigend)
 function archiveYears() { const s = new Set(); for (const g of db.archive) s.add(gameYear(g)); return Array.from(s).sort((a, b) => b - a); }
+// Kegelorte für den Statistik-Filter: alle bekannten Orte (auch inaktive), die im Archiv
+// vorkommen, plus – falls es Altbestand ohne Ort gibt – ein Sentinel für „Ohne Ort".
+function archivePlaces() {
+  const counts = new Map(); let noPlace = 0;
+  for (const g of db.archive) { if (g.placeId != null) counts.set(Number(g.placeId), (counts.get(Number(g.placeId)) || 0) + 1); else noPlace++; }
+  const list = [];
+  for (const p of db.places) if (counts.has(p.id)) list.push({ id: p.id, name: p.name, active: p.active, games: counts.get(p.id) });
+  // Orte, die es nicht mehr in db.places gibt, aber im Archiv referenziert sind (Name aus Snapshot)
+  for (const [pid, n] of counts) if (!db.places.some(p => p.id === pid)) { const g = db.archive.find(x => Number(x.placeId) === pid); list.push({ id: pid, name: (g && g.placeName) || ('#' + pid), active: false, games: n }); }
+  list.sort((a, b) => a.name.localeCompare(b.name));
+  return { list, noPlace };
+}
 // year = null/undefined -> alle Spiele; sonst nur Spiele des angegebenen Jahres
-function computeStats(year) {
+// place = null/undefined -> alle Orte; Zahl -> nur dieser Ort; 'none' -> nur Spiele ohne Ort
+function computeStats(year, place) {
   const agg = new Map();
   let kasse = 0, from = null, to = null, games = 0;
   for (const g of db.archive) {
     if (year != null && gameYear(g) !== year) continue;
+    if (place === 'none') { if (g.placeId != null) continue; }
+    else if (place != null && Number(g.placeId) !== Number(place)) continue;
     games++;
     if (from == null || g.savedAt < from) from = g.savedAt;
     if (to == null || g.savedAt > to) to = g.savedAt;
@@ -607,7 +648,8 @@ function computeStats(year) {
   }
   const players = Array.from(agg.values()).map(a => Object.assign(a, { avg: a.games ? a.points / a.games : 0, arrAvg: a.games ? a.arrSum / a.games : 0, pumpAvg: a.games ? a.cP / a.games : 0 }))
     .sort((x, y) => y.avg - x.avg || y.games - x.games);
-  return { summary: { games, from, to, kasse, year: year != null ? year : null }, years: archiveYears(), players };
+  const ap = archivePlaces();
+  return { summary: { games, from, to, kasse, year: year != null ? year : null, place: place != null ? place : null }, years: archiveYears(), places: ap.list, noPlaceGames: ap.noPlace, players };
 }
 
 // ---------- HTML-Export aller archivierten Spiele ----------
@@ -817,7 +859,8 @@ function buildExportHtml() {
   if (!games.length) h += '<p class="sub">Keine gespeicherten Spiele.</p>';
   games.forEach(g => {
     const ev = evalGame(g);
-    h += '<div class="game"><h3>' + (escHtml(g.event) || 'Spiel') + ' – ' + escHtml(fmtD(g.date)) + '</h3>';
+    const gpn = g.placeName || placeNameById(g.placeId) || '';
+    h += '<div class="game"><h3>' + (escHtml(g.event) || 'Spiel') + ' – ' + escHtml(fmtD(g.date)) + (gpn ? (' · ' + escHtml(gpn)) : '') + '</h3>';
     h += '<p class="sub">gespeichert von ' + escHtml(g.savedBy || '') + ' am ' + escHtml(fmtDT(g.savedAt)) +
       (ev.silberNames.length ? (' · <span class="sil">Ⓢ ' + ev.silberNames.map(escHtml).join(', ') + '</span>') : '') +
       (ev.pumpenNames.length ? (' · <span class="pmp">Ⓟ ' + ev.pumpenNames.map(escHtml).join(', ') + '</span>') : '') + '</p>';
@@ -849,6 +892,7 @@ function applyOp(op, user) {
   const s = db.sheet;
   switch (op && op.type) {
     case 'setMeta': if (!['event', 'date'].includes(op.field)) return null; s[op.field] = String(op.value || '').slice(0, 120); return { type: 'setMeta', field: op.field, value: s[op.field] };
+    case 'setPlace': { if (op.value == null || op.value === '') { s.placeId = null; return { type: 'setPlace', value: null }; } const pl = placeById(op.value); if (!pl) return null; s.placeId = pl.id; return { type: 'setPlace', value: pl.id }; }
     case 'setNote': if (!['pumpen', 'note'].includes(op.field)) return null; s[op.field] = String(op.value || '').slice(0, 4000); return { type: 'setNote', field: op.field, value: s[op.field] };
     case 'setPrice': { if (!['priceNK', 'pricePump'].includes(op.field)) return null; let v = Number(op.value); if (!isFinite(v) || v < 0) v = 0; s[op.field] = v; return { type: 'setPrice', field: op.field, value: v }; }
     case 'setLane': { if (!['bohle', 'schere'].includes(op.lane)) return null; const nx = Object.assign({}, s.lanes); nx[op.lane] = !!op.on; if (!nx.bohle && !nx.schere) return null; s.lanes = nx; return { type: 'setLane', lane: op.lane, on: !!op.on }; }
@@ -897,8 +941,10 @@ function applyOp(op, user) {
     // ----- Archiv -----
     case 'saveGame': {
       if (s.players.length === 0) return null;
+      // Harter Block: ohne gültigen Kegelort wird nicht archiviert
+      const gp = placeById(s.placeId); if (!gp) return null;
       const snap = { id: ++db.seqArchive, savedAt: Date.now(), savedBy: user.username,
-        event: s.event, date: s.date, lanes: { bohle: s.lanes.bohle, schere: s.lanes.schere },
+        event: s.event, date: s.date, placeId: gp.id, placeName: gp.name, lanes: { bohle: s.lanes.bohle, schere: s.lanes.schere },
         priceNK: s.priceNK, pricePump: s.pricePump, pumpen: s.pumpen, note: s.note,
         players: s.players.map(p => ({ rosterId: p.rosterId != null ? p.rosterId : null, name: p.name, c9: p.c9 || 0, cK: p.cK || 0, cP: p.cP || 0, b1: p.b1, b2: p.b2, s1: p.s1, s2: p.s2 })) };
       db.archive.push(snap);
@@ -929,6 +975,36 @@ function applyOp(op, user) {
       return { type: 'removePrize', id: Number(op.id) };
     }
     // ----- Kegelausflüge (Anlegen/Bearbeiten/Löschen nur mit Verwaltungsrecht) -----
+    // ----- Kegelorte: Anlegen jeder Rolle erlaubt; Umbenennen/Deaktivieren/Löschen nur mit Verwaltungsrecht -----
+    case 'addPlace': {
+      const nm = String(op.name || '').trim(); if (!nm) return null;
+      if (db.places.some(p => p.name.toLowerCase() === nm.toLowerCase())) return null;
+      const place = { id: ++db.seqPlaces, name: nm.slice(0, PLACE_NAME_MAX), active: true };
+      db.places.push(place);
+      return { type: 'addPlace', place };
+    }
+    case 'renamePlace': {
+      if (!canManage(user.role)) return null;
+      const p = placeById(op.id); if (!p) return null;
+      const nm = String(op.name || '').trim(); if (!nm) return null;
+      if (db.places.some(x => x.id !== p.id && x.name.toLowerCase() === nm.toLowerCase())) return null;
+      p.name = nm.slice(0, PLACE_NAME_MAX);
+      return { type: 'renamePlace', id: p.id, name: p.name };
+    }
+    case 'setPlaceActive': {
+      if (!canManage(user.role)) return null;
+      const p = placeById(op.id); if (!p) return null;
+      p.active = !!op.active;
+      if (!p.active && s.placeId === p.id) s.placeId = null;
+      return { type: 'setPlaceActive', id: p.id, active: p.active };
+    }
+    case 'removePlace': {
+      if (!canManage(user.role)) return null;
+      const b = db.places.length; db.places = db.places.filter(x => x.id !== Number(op.id));
+      if (db.places.length === b) return null;
+      if (s.placeId === Number(op.id)) s.placeId = null;
+      return { type: 'removePlace', id: Number(op.id) };
+    }
     case 'addTrip': {
       if (!canManage(user.role)) return null;
       const t = normTrip(op.trip || {}); if (t.year == null) return null;
@@ -1208,7 +1284,7 @@ function handle(req, res) {
     catch (e) { return send(res, 400, { error: 'Daten zu lang für QR' }); }
   }
   if (api === '/logout' && req.method === 'POST') { clearSessionCookie(res); return send(res, 200, { ok: true }); }
-  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView), me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
+  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, places: db.places, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView), me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
   if (api === '/roster' && req.method === 'GET') return send(res, 200, { roster: db.roster });
   if (api === '/archive' && req.method === 'GET') return send(res, 200, { archive: db.archive.map(archiveMeta).sort((a, b) => b.savedAt - a.savedAt) });
   if (api === '/export' && req.method === 'GET') {
@@ -1228,13 +1304,13 @@ function handle(req, res) {
   }
 
   const mA = api.match(/^\/archive\/(\d+)$/);
-  if (mA && req.method === 'GET') { const g = db.archive.find(a => a.id === Number(mA[1])); if (!g) return send(res, 404, { error: 'nicht gefunden' }); return send(res, 200, { game: { id: g.id, event: g.event, date: g.date, savedAt: g.savedAt, savedBy: g.savedBy, pumpen: g.pumpen, note: g.note }, eval: evalGame(g) }); }
-  if (api === '/stats' && req.method === 'GET') { const yq = u.searchParams.get('year'); const yr = /^\d{4}$/.test(String(yq || '')) ? Number(yq) : null; return send(res, 200, computeStats(yr)); }
+  if (mA && req.method === 'GET') { const g = db.archive.find(a => a.id === Number(mA[1])); if (!g) return send(res, 404, { error: 'nicht gefunden' }); return send(res, 200, { game: { id: g.id, event: g.event, date: g.date, place: g.placeName || placeNameById(g.placeId) || '', savedAt: g.savedAt, savedBy: g.savedBy, pumpen: g.pumpen, note: g.note }, eval: evalGame(g) }); }
+  if (api === '/stats' && req.method === 'GET') { const yq = u.searchParams.get('year'); const yr = /^\d{4}$/.test(String(yq || '')) ? Number(yq) : null; const pq = u.searchParams.get('place'); const pl = (pq === 'none') ? 'none' : (/^\d+$/.test(String(pq || '')) ? Number(pq) : null); return send(res, 200, computeStats(yr, pl)); }
 
   if (api === '/events' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.write('retry: 3000\n\n');
-    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView) }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, places: db.places, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView) }) + '\n\n');
     const c = { res, uid: me.id }; clients.add(c); req.on('close', () => clients.delete(c)); return;
   }
 
@@ -1242,6 +1318,9 @@ function handle(req, res) {
     if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
     return readJson(req, body => {
       if (!body || !body.op) return send(res, 400, { error: 'bad request' });
+      if (body.op.type === 'saveGame' && !placeById(db.sheet.placeId)) {
+        return send(res, 422, { error: 'Kein Kegelort gewählt – bitte zuerst einen Ort zuordnen.' });
+      }
       if (body.op.type === 'saveGame' && me.role !== 'admin' && throwsUnequal(db.sheet)) {
         return send(res, 422, { error: 'Ungleiche Wurf-Anzahl – nur ein Admin kann ein solches Spiel speichern.' });
       }

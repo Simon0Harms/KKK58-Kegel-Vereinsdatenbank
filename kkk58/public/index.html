@@ -82,6 +82,12 @@
   .toprow input{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);color:#fff;border-radius:8px;padding:6px 8px;min-width:0}
   .toprow input::placeholder{color:rgba(255,255,255,.7)}
   #f_event{flex:1 1 160px}
+  .placewrap{display:flex;gap:6px;align-items:center;flex:1 1 200px}
+  .toprow select{border:1px solid rgba(255,255,255,.28);border-radius:8px;padding:6px 8px;min-width:0}
+  #f_place{flex:1 1 auto;min-width:120px;color:#14202b;background:#fff}
+  #f_place option{color:#14202b;background:#fff}
+  #f_place.needsel{border-color:#c0392b;box-shadow:0 0 0 2px rgba(192,57,43,.18)}
+  .placetag{font-weight:400;font-size:.85em;color:var(--muted);white-space:nowrap}
   .who{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:.85rem}
   .who .dot{width:8px;height:8px;border-radius:50%;background:#8fd6bf}
   .who .dot.off{background:#e0b0b0}
@@ -460,6 +466,7 @@
       <div><div class="eyebrow">Anschreib-Liste</div><h1>KKk58</h1></div>
       <input id="f_event" type="text" placeholder="Anlass / Turnier" data-fkey="meta:event">
       <input id="f_date" type="date" data-fkey="meta:date">
+      <span class="placewrap"><select id="f_place" title="Kegelort – Pflicht zum Speichern"></select><button id="f_place_manage" class="btn ghost sm" type="button" title="Kegelorte anlegen/verwalten">Orte ⚙</button></span>
       <div class="who"><span class="dot" id="conn"></span><span id="whoName"></span></div>
     </div>
     <div class="nav">
@@ -722,6 +729,24 @@
   </div>
 </div>
 
+<!-- KEGELORTE: Verwaltungs-Dialog -->
+<div id="placedlg" class="ovl hidden">
+  <div class="login dirdlg">
+    <div class="eyebrow">Kegelorte</div>
+    <h1>Kegelorte verwalten</h1>
+    <div class="ddrow" style="margin:0 0 10px">
+      <input id="pl_new" type="text" placeholder="Neuer Kegelort, z. B. Kegelbahn Musterhausen" autocapitalize="words" maxlength="80" style="flex:1">
+      <button class="btn prim" id="pl_add" type="button">＋ Anlegen</button>
+    </div>
+    <div class="dderr err" id="pl_err"></div>
+    <div id="placeList"></div>
+    <p class="foot" id="placeFoot" style="text-align:left">Jede angemeldete Person kann Orte anlegen. Umbenennen, Deaktivieren und Löschen nur mit Verwaltungsrecht (Admin, Kassenwart, Mitglied). Deaktivierte Orte bleiben in der Statistik erhalten, lassen sich aber nicht mehr neu zuordnen. Beim Löschen bleiben bereits archivierte Spiele samt Ort erhalten.</p>
+    <div class="ddrow">
+      <button class="btn" id="pl_close" type="button">Schließen</button>
+    </div>
+  </div>
+</div>
+
 <!-- CHRONIK: Bearbeiten-Dialog -->
 <div id="devdlg" class="ovl hidden">
   <div class="login dirdlg">
@@ -839,7 +864,7 @@
   const canManage=r=>r==="admin"||r==="kassenwart"||r==="mitglied";
   const canCash=r=>r==="admin"||r==="kassenwart";
   const roleLabel=r=>ROLE_LABEL[r]||r;
-  let me=null, state=null, roster=[], prizes=[], trips=[], develop=[], events=[], polls=[], version=0, es=null, currentView="sheet", sortMode="arrival";
+  let me=null, state=null, roster=[], places=[], prizes=[], trips=[], develop=[], events=[], polls=[], version=0, es=null, currentView="sheet", sortMode="arrival";
   const pending=new Set();
   const rid=()=> (crypto.randomUUID? crypto.randomUUID() : String(Date.now())+Math.random());
   const $=id=>document.getElementById(id);
@@ -1038,7 +1063,7 @@
   $("pw_new2").addEventListener("keydown",e=>{if(e.key==='Enter')submitPw();});
 
   async function loadState(){ const r=await api('/state');
-    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; events=r.data.events||[]; polls=r.data.polls||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog();
+    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; places=r.data.places||[]; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; events=r.data.events||[]; polls=r.data.polls||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderPlaceSelect(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog();
       if(me&&me.mustChangePassword&&$("pwdlg").classList.contains("hidden")) openPwDialog(); }
     else if(r.status===401) showLogin(); }
   function resync(){ loadState(); }
@@ -1078,7 +1103,7 @@
     if(v==="polls") renderPolls();
   }
   // Fokus-Modus: nur die Liste zum Eintragen (Menü/Kopf ausgeblendet)
-  function updateFocusMeta(){ const ev=($("f_event").value||"").trim(), dt=$("f_date").value||""; $("fbMeta").textContent=[ev,dt].filter(Boolean).join(" · "); }
+  function updateFocusMeta(){ const ev=($("f_event").value||"").trim(), dt=$("f_date").value||""; const pl=(state&&state.placeId!=null)?((places.find(p=>p.id===state.placeId)||{}).name||""):""; $("fbMeta").textContent=[ev,dt,pl].filter(Boolean).join(" · "); }
   function setFocus(on){ document.body.classList.toggle("focus",!!on); if(on)updateFocusMeta(); try{localStorage.setItem("kkk58_focus",on?"1":"0");}catch(_){} }
   $("nav_sheet").addEventListener("click",()=>setView("sheet"));
   $("nav_archive").addEventListener("click",()=>setView("archive"));
@@ -1100,7 +1125,7 @@
     es.onopen=()=>$("conn").classList.remove("off");
     es.onerror=()=>$("conn").classList.add("off");
     es.onmessage=ev=>{ let m; try{m=JSON.parse(ev.data);}catch(_){return;}
-      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; prizes=m.prizes||prizes; trips=m.trips||trips; develop=m.develop||develop; events=m.events||events; polls=m.polls||polls; version=m.v; pending.clear(); rebuildDatalist(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog(); return; }
+      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; places=m.places||places; prizes=m.prizes||prizes; trips=m.trips||trips; develop=m.develop||develop; events=m.events||events; polls=m.polls||polls; version=m.v; pending.clear(); rebuildDatalist(); renderPlaceSelect(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog(); return; }
       applyRemote(m); }; }
   function applyRemote(m){
     if(typeof m.v!=='number')return;
@@ -1116,6 +1141,11 @@
     const P=id=>state.players.find(p=>p.id===id);
     switch(op.type){
       case 'setMeta': state[op.field]=op.value; setInput('meta:'+op.field,op.value); break;
+      case 'setPlace': state.placeId=(op.value!=null?op.value:null); renderPlaceSelect(); return;
+      case 'addPlace': if(op.place && !places.some(p=>p.id===op.place.id)) places.push(op.place); renderPlaceSelect(); renderPlaceList(); return;
+      case 'renamePlace': { const p=places.find(x=>x.id===op.id); if(p)p.name=op.name; renderPlaceSelect(); renderPlaceList(); return; }
+      case 'setPlaceActive': { const p=places.find(x=>x.id===op.id); if(p)p.active=op.active; if(!op.active && state.placeId===op.id) state.placeId=null; renderPlaceSelect(); renderPlaceList(); return; }
+      case 'removePlace': places=places.filter(x=>x.id!==op.id); if(state.placeId===op.id) state.placeId=null; renderPlaceSelect(); renderPlaceList(); return;
       case 'setNote': state[op.field]=op.value; setInput('note:'+op.field,op.value); break;
       case 'setPrice': state[op.field]=op.value; setInput('price:'+op.field,op.value); updateDerived(); break;
       case 'setLane': state.lanes[op.lane]=op.on; renderAll(); return;
@@ -1190,6 +1220,7 @@
     const act=document.activeElement; let fkey=null,ss=null,se=null;
     if(act&&act.dataset&&act.dataset.fkey){ fkey=act.dataset.fkey; try{ss=act.selectionStart;se=act.selectionEnd;}catch(_){}}
     $("f_event").value=state.event||""; $("f_date").value=state.date||"";
+    renderPlaceSelect();
     if(document.body.classList.contains("focus"))updateFocusMeta();
     $("chk_bohle").checked=!!state.lanes.bohle; $("chk_schere").checked=!!state.lanes.schere;
     $("lbl_bohle").classList.toggle("on",!!state.lanes.bohle); $("lbl_schere").classList.toggle("on",!!state.lanes.schere);
@@ -1366,6 +1397,14 @@
     return { issues, unequal:new Set(throwCounts).size>1 };
   }
   $("btn_save").addEventListener("click",async()=>{ if(!state.players.length){toast("Keine Spieler zum Speichern.");return;}
+    if(state.placeId==null){
+      if(document.body.classList.contains("focus")) setFocus(false); // Kopf mit Ort-Auswahl sichtbar machen
+      $("f_place")&&$("f_place").classList.add("needsel");
+      if(!places.filter(p=>p.active).length){
+        if(confirm("Zum Speichern muss ein Kegelort zugeordnet sein. Es ist noch kein Ort angelegt.\n\nJetzt einen Kegelort anlegen?")) openPlaceManage();
+      } else { alert("Speichern nicht möglich:\n\nBitte oben einen Kegelort auswählen."); try{$("f_place").focus();}catch(_){} }
+      return;
+    }
     const chk=saveCheck();
     const isAdmin=!!(me&&me.role==='admin');
     if(chk.unequal && !isAdmin){
@@ -1592,6 +1631,53 @@
     const rows=tripsSorted().map(t=>[t.year,t.place,t.description,t.period].map(csvCell).join(';'));
     const csv='﻿'+[head.map(csvCell).join(';')].concat(rows).join('\r\n');
     dlBlob(csv,'text/csv;charset=utf-8','KKk58-Kegelausfluege-'+new Date().toISOString().slice(0,10)+'.csv'); toast('CSV erstellt.'); });
+
+  // ---------- Kegelorte (Spielorte) ----------
+  function placesSorted(){ return places.slice().sort((a,b)=>(a.active===b.active)?a.name.localeCompare(b.name):(a.active?-1:1)); }
+  function renderPlaceSelect(){ const sel=$("f_place"); if(!sel||!state)return;
+    const cur=state.placeId!=null?state.placeId:"";
+    const active=places.filter(p=>p.active);
+    // aktuell zugeordneten (evtl. inaktiven) Ort trotzdem anzeigen, damit die Auswahl sichtbar bleibt
+    const curPlace=(cur!==""&&!active.some(p=>p.id===cur))?places.find(p=>p.id===cur):null;
+    let opts='<option value="">— Ort wählen —</option>';
+    active.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(p=>{ opts+='<option value="'+p.id+'">'+esc(p.name)+'</option>'; });
+    if(curPlace) opts+='<option value="'+curPlace.id+'">'+esc(curPlace.name)+' (inaktiv)</option>';
+    if(!active.length && !curPlace) opts='<option value="">— noch kein Ort angelegt —</option>';
+    sel.innerHTML=opts; sel.value=String(cur);
+    sel.classList.toggle("needsel", cur==="");
+  }
+  $("f_place").addEventListener("change",e=>{ const v=e.target.value; state.placeId=v===""?null:Number(v); opValue({type:'setPlace',value:v===""?null:Number(v)}); renderPlaceSelect(); });
+  function renderPlaceList(){ const box=$("placeList"); if(!box)return; const manage=!!(me&&effManage());
+    if(!places.length){ box.innerHTML='<div class="prizeempty">Noch keine Kegelorte angelegt.</div>'; return; }
+    const rows=placesSorted().map(p=>'<tr>'
+      +'<td class="l">'+esc(p.name)+(p.active?'':' <span class="badge">inaktiv</span>')+'</td>'
+      +(manage?('<td class="tactions"><button class="btn sm" type="button" data-pedit="'+p.id+'">Umbenennen</button> '
+        +'<button class="btn sm" type="button" data-ptog="'+p.id+'">'+(p.active?'Deaktivieren':'Aktivieren')+'</button> '
+        +'<button class="btn warn sm" type="button" data-pdel="'+p.id+'">Löschen</button></td>'):'<td></td>')
+      +'</tr>').join("");
+    box.innerHTML='<div class="tablewrap"><table class="triptable"><thead><tr><th class="l">Kegelort</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    box.querySelectorAll('[data-pedit]').forEach(b=>b.addEventListener("click",()=>{ const p=places.find(x=>x.id===Number(b.dataset.pedit)); if(!p)return;
+      const nm=prompt("Neuer Name für den Kegelort:",p.name); if(nm==null)return; const t=nm.trim(); if(!t){toast("Name darf nicht leer sein.");return;}
+      opStruct({type:'renamePlace',id:p.id,name:t}); }));
+    box.querySelectorAll('[data-ptog]').forEach(b=>b.addEventListener("click",()=>{ const p=places.find(x=>x.id===Number(b.dataset.ptog)); if(!p)return;
+      opStruct({type:'setPlaceActive',id:p.id,active:!p.active}); }));
+    box.querySelectorAll('[data-pdel]').forEach(b=>b.addEventListener("click",()=>{ const p=places.find(x=>x.id===Number(b.dataset.pdel)); if(!p)return;
+      if(confirm('Kegelort „'+p.name+'" wirklich löschen?\n\nBereits archivierte Spiele behalten ihren Ort. Alternativ kannst du den Ort nur deaktivieren.')) opStruct({type:'removePlace',id:p.id}); }));
+  }
+  function openPlaceManage(){ if(!me)return; $("pl_err").textContent=""; $("pl_new").value="";
+    const manage=!!(me&&effManage());
+    $("placeFoot").classList.toggle("hidden",false);
+    renderPlaceList(); $("placedlg").classList.remove("hidden"); setTimeout(()=>$("pl_new").focus(),50); }
+  function closePlaceManage(){ $("placedlg").classList.add("hidden"); }
+  function addPlaceFromDlg(){ const t=($("pl_new").value||"").trim(); $("pl_err").textContent="";
+    if(!t){ $("pl_err").textContent="Bitte einen Namen eingeben."; return; }
+    if(places.some(p=>p.name.toLowerCase()===t.toLowerCase())){ $("pl_err").textContent="Diesen Kegelort gibt es bereits."; return; }
+    opStruct({type:'addPlace',name:t}); $("pl_new").value=""; $("pl_new").focus(); }
+  $("f_place_manage").addEventListener("click",openPlaceManage);
+  $("pl_add").addEventListener("click",addPlaceFromDlg);
+  $("pl_new").addEventListener("keydown",e=>{ if(e.key==="Enter"){e.preventDefault();addPlaceFromDlg();} });
+  $("pl_close").addEventListener("click",closePlaceManage);
+  $("placedlg").addEventListener("click",e=>{ if(e.target===$("placedlg"))closePlaceManage(); });
 
   // ---------- Chronik / Mitgliederentwicklung ----------
   let devEditId=null;
@@ -1889,7 +1975,7 @@
     $("arcList").innerHTML=a.map(g=>{ const d=fmtDate(g.date);
       const sil=g.silberNames&&g.silberNames.length?('Ⓢ '+g.silberNames.map(esc).join(", ")):'';
       return '<div class="arccard" data-id="'+g.id+'"><div class="d"><div class="dd">'+d.dd+'</div><div class="mm">'+d.mm+'</div></div>'+
-        '<div class="mid"><div class="t">'+(esc(g.event)||'Spiel')+'</div><div class="s">'+g.players+' Spieler · '+sil+'</div></div>'+
+        '<div class="mid"><div class="t">'+(esc(g.event)||'Spiel')+(g.place?(' <span class="placetag">📍 '+esc(g.place)+'</span>'):'')+'</div><div class="s">'+g.players+' Spieler · '+sil+'</div></div>'+
         '<div class="r"><b>'+euro(g.kasseTotal)+'</b><br>'+esc(g.savedBy||'')+'</div></div>';
     }).join("");
     $("arcList").querySelectorAll('.arccard').forEach(c=>c.addEventListener("click",()=>openGame(Number(c.dataset.id))));
@@ -1928,7 +2014,7 @@
     const g=r.data.game, ev=r.data.eval; const d=g.date?new Date(g.date+"T00:00:00").toLocaleDateString("de-DE"):'ohne Datum';
     let h='<button class="backbtn" id="arcBack">← Zurück zum Archiv</button>';
     h+='<h2 style="margin:.2em 0">'+(esc(g.event)||'Spiel')+'</h2>';
-    h+='<div class="detmeta">'+d+' · gespeichert von '+esc(g.savedBy||'')+(ev.silberNames.length?(' · Ⓢ '+ev.silberNames.map(esc).join(", ")):'')+(ev.pumpenNames.length?(' · Ⓟ '+ev.pumpenNames.map(esc).join(", ")):'')+'</div>';
+    h+='<div class="detmeta">'+d+(g.place?(' · 📍 '+esc(g.place)):'')+' · gespeichert von '+esc(g.savedBy||'')+(ev.silberNames.length?(' · Ⓢ '+ev.silberNames.map(esc).join(", ")):'')+(ev.pumpenNames.length?(' · Ⓟ '+ev.pumpenNames.map(esc).join(", ")):'')+'</div>';
     h+='<div class="tablewrap"><table><thead><tr><th>Pl.</th><th title="Reihenfolge des Eintreffens">Ank.</th><th style="text-align:left">Name</th><th>9</th><th>⑧</th><th>Pump</th>';
     if(ev.lanes.bohle)h+='<th class="grp">Bo1</th><th class="grp">Bo2</th><th class="grp">ΣBo</th>';
     if(ev.lanes.schere)h+='<th class="grp">Sc1</th><th class="grp">Sc2</th><th class="grp">ΣSc</th>';
@@ -1949,16 +2035,22 @@
   }
 
   // ---------- Statistik ----------
-  let statsData=null, statsRankMode='avg', statsYear=null;
+  let statsData=null, statsRankMode='avg', statsYear=null, statsPlace=null;
   async function loadStats(){ const box=$("statsBody");
-    const r=await api('/stats'+(statsYear!=null?('?year='+statsYear):''));
+    const qs=[]; if(statsYear!=null)qs.push('year='+statsYear); if(statsPlace!=null)qs.push('place='+encodeURIComponent(statsPlace));
+    const r=await api('/stats'+(qs.length?('?'+qs.join('&')):''));
     if(!r.ok){ box.innerHTML='<div class="arcempty">Konnte Statistik nicht laden.</div>'; statsData=null; return; }
     statsData=r.data;
     // Gewähltes Jahr nicht mehr vorhanden (z. B. Spiel gelöscht) -> zurück auf Alle
     if(statsYear!=null && Array.isArray(statsData.years) && !statsData.years.includes(statsYear)){ statsYear=null; return loadStats(); }
+    // Gewählter Ort nicht mehr vorhanden -> zurück auf Alle Orte
+    const plist=Array.isArray(statsData.places)?statsData.places:[];
+    if(statsPlace==='none'){ if(!statsData.noPlaceGames){ statsPlace=null; return loadStats(); } }
+    else if(statsPlace!=null && !plist.some(p=>p.id===Number(statsPlace))){ statsPlace=null; return loadStats(); }
     renderStats(); }
   function setRank(m){ statsRankMode=m; renderStats(); }
   function setStatsYear(y){ if(statsYear===y)return; statsYear=y; loadStats(); }
+  function setStatsPlace(p){ if(statsPlace===p)return; statsPlace=p; loadStats(); }
   function renderStats(){ const box=$("statsBody"); if(!statsData)return; const {summary,players}=statsData;
     const years=Array.isArray(statsData.years)?statsData.years:[];
     // Jahresumschalter nur zeigen, wenn Spiele aus mehr als einem Jahr vorliegen
@@ -1966,15 +2058,26 @@
        '<button id="year_all" type="button" class="'+(statsYear==null?'active':'')+'">All-Time</button>'+
        years.map(y=>'<button type="button" data-year="'+y+'" class="'+(statsYear===y?'active':'')+'">'+y+'</button>').join('')+
        '</div></div></div>'):'';
-    const bindYears=()=>{ const ab=$("year_all"); if(ab)ab.addEventListener("click",()=>setStatsYear(null)); box.querySelectorAll('button[data-year]').forEach(b=>b.addEventListener("click",()=>setStatsYear(Number(b.getAttribute("data-year"))))); };
-    if(!players.length){ box.innerHTML=yearBar+'<div class="arcempty">'+(statsYear!=null?('Keine Spiele im Jahr '+statsYear+'.'):'Noch keine Statistik – erst Spiele im Archiv speichern.')+'</div>'; bindYears(); return; }
+    // Ort-Filter: nur zeigen, wenn es mehr als eine Auswahl gibt (Orte + evtl. "Ohne Ort")
+    const plist=Array.isArray(statsData.places)?statsData.places:[];
+    const choiceCount=plist.length+(statsData.noPlaceGames?1:0);
+    const placeBar=choiceCount>1?('<div class="controls" style="margin-bottom:8px"><div class="sortpick" style="margin-left:0"><span class="sortlbl">Kegelort:</span><div class="seg">'+
+       '<button id="place_all" type="button" class="'+(statsPlace==null?'active':'')+'">Alle Orte</button>'+
+       plist.map(p=>'<button type="button" data-place="'+p.id+'" class="'+(String(statsPlace)===String(p.id)?'active':'')+'">'+esc(p.name)+(p.active?'':' (inaktiv)')+'</button>').join('')+
+       (statsData.noPlaceGames?('<button type="button" data-place="none" class="'+(statsPlace==='none'?'active':'')+'">Ohne Ort</button>'):'')+
+       '</div></div></div>'):'';
+    const filterBar=yearBar+placeBar;
+    const bindYears=()=>{ const ab=$("year_all"); if(ab)ab.addEventListener("click",()=>setStatsYear(null)); box.querySelectorAll('button[data-year]').forEach(b=>b.addEventListener("click",()=>setStatsYear(Number(b.getAttribute("data-year")))));
+      const pa=$("place_all"); if(pa)pa.addEventListener("click",()=>setStatsPlace(null)); box.querySelectorAll('button[data-place]').forEach(b=>b.addEventListener("click",()=>{ const v=b.getAttribute("data-place"); setStatsPlace(v==='none'?'none':Number(v)); })); };
+    const placeName=statsPlace==='none'?'Ohne Ort':(statsPlace!=null?((plist.find(p=>p.id===Number(statsPlace))||{}).name||''):'');
+    if(!players.length){ box.innerHTML=filterBar+'<div class="arcempty">'+(statsPlace!=null?('Keine Spiele'+(placeName?(' für „'+esc(placeName)+'"'):'')+(statsYear!=null?(' im Jahr '+statsYear):'')+'.'):(statsYear!=null?('Keine Spiele im Jahr '+statsYear+'.'):'Noch keine Statistik – erst Spiele im Archiv speichern.'))+'</div>'; bindYears(); return; }
     const span=(summary.from&&summary.to)?(new Date(summary.from).toLocaleDateString("de-DE")+' – '+new Date(summary.to).toLocaleDateString("de-DE")):'';
     const mode=statsRankMode;
     const val=p=> mode==='best'? p.best : p.avg;
     const sorted=players.slice().sort((x,y)=> val(y)-val(x) || (mode==='best'? (y.avg-x.avg):(y.best-x.best)) || y.games-x.games);
     let rank=0,prev=null; sorted.forEach((p,i)=>{ const v=val(p); if(prev===null||v!==prev){rank=i+1;prev=v;} p._rank=rank; });
     const mk=(active,txt)=> active?(txt+' ▼'):txt;
-    let h=yearBar+'<div class="statsum">'+(statsYear!=null?('<div>Jahr <b>'+statsYear+'</b></div>'):'')+'<div><b>'+summary.games+'</b> Spiele</div>'+(span?('<div>'+span+'</div>'):'')+'<div>Kasse gesamt: <b>'+euro(summary.kasse)+'</b></div><div><b>'+players.length+'</b> Spieler</div></div>';
+    let h=filterBar+'<div class="statsum">'+(statsYear!=null?('<div>Jahr <b>'+statsYear+'</b></div>'):'')+(placeName?('<div>Ort <b>'+esc(placeName)+'</b></div>'):'')+'<div><b>'+summary.games+'</b> Spiele</div>'+(span?('<div>'+span+'</div>'):'')+'<div>Kasse gesamt: <b>'+euro(summary.kasse)+'</b></div><div><b>'+players.length+'</b> Spieler</div></div>';
     h+='<div class="controls" style="margin-bottom:8px"><div class="sortpick" style="margin-left:0"><span class="sortlbl">Rangliste:</span><div class="seg">'+
        '<button id="rank_avg" type="button" class="'+(mode==='avg'?'active':'')+'">Ø Punkte</button>'+
        '<button id="rank_best" type="button" class="'+(mode==='best'?'active':'')+'">Beste</button></div></div></div>';
