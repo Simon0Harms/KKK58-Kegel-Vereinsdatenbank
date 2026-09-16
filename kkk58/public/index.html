@@ -142,6 +142,16 @@
   .addrow input{flex:1 1 200px;border:1px solid var(--line-strong);border-radius:9px;padding:11px}
   .addrow button{padding:11px 16px;border:none;border-radius:9px;background:var(--pine);color:#fff;font-weight:700;cursor:pointer}
   .addrow button:hover{background:var(--pine-dark)}
+  .acwrap{position:relative;flex:1 1 200px;display:flex}
+  .acwrap input{flex:1 1 auto;width:100%}
+  .acbox{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:60;background:var(--card,#fff);border:1px solid var(--line-strong);border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,.18);max-height:260px;overflow-y:auto;-webkit-overflow-scrolling:touch;display:none}
+  .acbox.open{display:block}
+  .acitem{padding:11px 12px;cursor:pointer;border-bottom:1px solid var(--line,#eee);font-size:15px}
+  .acitem:last-child{border-bottom:none}
+  .acitem.active,.acitem:hover{background:var(--pine);color:#fff}
+  .acitem .sub{color:var(--muted,#888);font-size:12px}
+  .acitem.active .sub,.acitem:hover .sub{color:rgba(255,255,255,.8)}
+  .acempty{padding:11px 12px;color:var(--muted,#888);font-size:14px}
 
   .kasse{margin-top:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:12px 14px}
   .kasse h2{margin:0 0 10px;font-size:.74rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
@@ -501,8 +511,11 @@
     <div class="silberbar pumpenbar" id="pumpenbar"></div>
     <div class="tablewrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
     <div class="addrow">
-      <input id="addName" list="rosterlist" placeholder="Spieler wählen oder neuen Namen eingeben …" autocapitalize="words">
-      <datalist id="rosterlist"></datalist>
+      <div class="acwrap">
+        <input id="addName" list="rosterlist" placeholder="Spieler wählen oder neuen Namen eingeben …" autocapitalize="words" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="addNameAC">
+        <datalist id="rosterlist"></datalist>
+        <div class="acbox" id="addNameAC" role="listbox"></div>
+      </div>
       <button id="btn_add" type="button">＋ Hinzufügen</button>
     </div>
 
@@ -1293,7 +1306,46 @@
       opStruct({type:'addPlayer',name:name,createRoster:true}); $("addName").value=""; $("addName").focus();
     } }
   $("btn_add").addEventListener("click",addPlayer);
-  $("addName").addEventListener("keydown",e=>{if(e.key==='Enter')addPlayer();});
+
+  // ---------- Eigene Autocomplete (Firefox-Android zeigt <datalist> nicht) ----------
+  const acInput=$("addName"), acBox=$("addNameAC");
+  let acItems=[], acIdx=-1;
+  function acCandidates(q){
+    const players=(state&&state.players)?state.players:[];
+    const usedIds=new Set(players.map(p=>p.rosterId).filter(x=>x!=null));
+    const usedNames=new Set(players.map(p=>(p.name||'').toLowerCase()));
+    const term=(q||'').trim().toLowerCase();
+    return roster.slice()
+      .filter(r=>!usedIds.has(r.id) && !usedNames.has((r.name||'').toLowerCase()))
+      .filter(r=>!term || (r.name||'').toLowerCase().includes(term))
+      .sort((a,b)=>a.name.localeCompare(b.name))
+      .slice(0,50);
+  }
+  function acClose(){ acBox.classList.remove('open'); acInput.setAttribute('aria-expanded','false'); acIdx=-1; }
+  function acOpen(){
+    acItems=acCandidates(acInput.value);
+    if(!acItems.length){ acBox.innerHTML='<div class="acempty">Keine passenden Spieler im Stamm.</div>'; }
+    else{
+      acBox.innerHTML=acItems.map((r,i)=>{
+        const sub=r.active===false?'<span class="sub"> · inaktiv</span>':'';
+        return '<div class="acitem" role="option" data-i="'+i+'">'+esc(r.name)+sub+'</div>';
+      }).join("");
+    }
+    acBox.classList.add('open'); acInput.setAttribute('aria-expanded','true'); acIdx=-1;
+  }
+  function acHighlight(){ acBox.querySelectorAll('.acitem').forEach((el,i)=>el.classList.toggle('active',i===acIdx)); }
+  function acPick(i){ if(i<0||i>=acItems.length)return; acInput.value=acItems[i].name; acClose(); addPlayer(); }
+  acInput.addEventListener('input',acOpen);
+  acInput.addEventListener('focus',acOpen);
+  acBox.addEventListener('mousedown',e=>{ const it=e.target.closest('.acitem'); if(it){ e.preventDefault(); acPick(Number(it.dataset.i)); }});
+  acInput.addEventListener('keydown',e=>{
+    const open=acBox.classList.contains('open');
+    if(e.key==='ArrowDown'){ if(!open){acOpen();return;} e.preventDefault(); acIdx=Math.min(acIdx+1,acItems.length-1); acHighlight(); }
+    else if(e.key==='ArrowUp'){ if(!open)return; e.preventDefault(); acIdx=Math.max(acIdx-1,0); acHighlight(); }
+    else if(e.key==='Enter'){ e.preventDefault(); if(open&&acIdx>=0)acPick(acIdx); else { acClose(); addPlayer(); } }
+    else if(e.key==='Escape'){ acClose(); }
+  });
+  document.addEventListener('click',e=>{ if(!e.target.closest('.acwrap'))acClose(); });
   function setSort(m){ sortMode=m; $("sort_arr").classList.toggle("active",m==='arrival'); $("sort_pts").classList.toggle("active",m==='points'); if(state)renderAll(); }
   $("sort_arr").addEventListener("click",()=>setSort('arrival'));
   $("sort_pts").addEventListener("click",()=>setSort('points'));
