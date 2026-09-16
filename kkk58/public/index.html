@@ -4,6 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>KKk58 – Vereinsdatenbank</title>
+<script>
+  (function(){
+    try{
+      var s=localStorage.getItem("kkk58-theme");
+      if(!s){
+        // Ohne gespeicherte Wahl der Systemeinstellung folgen;
+        // ist diese nicht auslesbar, ist der Dark-Modus die Standardansicht.
+        s=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches)?"light":"dark";
+      }
+      document.documentElement.setAttribute("data-theme",s);
+    }catch(e){ document.documentElement.setAttribute("data-theme","dark"); }
+  })();
+</script>
 <style>
   :root{
     --bg:#e9ecef; --card:#ffffff; --ink:#14202b; --muted:#64727e;
@@ -319,6 +332,59 @@
   .ddrow{display:flex;gap:8px;margin-top:14px}
   .ddrow .btn{flex:1;padding:12px;border-radius:9px;font-weight:700;font-size:1rem;cursor:pointer}
   @media(max-width:560px){ .dirgrid{grid-template-columns:1fr} }
+
+  /* ===== Dark-Modus ===== */
+  html[data-theme="dark"]{
+    --bg:#0f1519; --card:#1a242b; --ink:#e6ebef; --muted:#93a2ad;
+    --line:#2b363e; --line-strong:#3b4852; --stripe:#202b32;
+    --pine:#2a9377; --pine-dark:#4fbb9c; --pine-soft:#173a30;
+    --lane:#c9954a; --lane-soft:#38301f; --lane-ink:#e0b978;
+    --gold:#d0b04a; --silver:#9aa4ad; --bronze:#c08048;
+    --danger:#e06a6a; --danger-soft:#3a2222;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.45);
+    color-scheme:dark;
+  }
+  /* Formularfelder im Inhaltsbereich (Kopfzeile behält ihr eigenes Styling) */
+  html[data-theme="dark"] .login input,
+  html[data-theme="dark"] .addrow input,
+  html[data-theme="dark"] .fld input,
+  html[data-theme="dark"] .notegrid input,
+  html[data-theme="dark"] .notegrid textarea,
+  html[data-theme="dark"] .miniform input,
+  html[data-theme="dark"] .miniform select,
+  html[data-theme="dark"] .pricecfg input,
+  html[data-theme="dark"] .dirgrid .fld input,
+  html[data-theme="dark"] .dirbar #dir_search,
+  html[data-theme="dark"] .linkrow input,
+  html[data-theme="dark"] .dirdlg textarea,
+  html[data-theme="dark"] input.score,
+  html[data-theme="dark"] .step input{background:var(--card);color:var(--ink);border-color:var(--line-strong)}
+  html[data-theme="dark"] thead th,
+  html[data-theme="dark"] .stbl th{background:#232f37}
+  html[data-theme="dark"] .step .ar button{background:var(--stripe);color:var(--pine-dark)}
+  html[data-theme="dark"] .btn.ghost{background:var(--stripe);color:var(--ink)}
+  html[data-theme="dark"] .btn.ghost:hover{background:var(--line)}
+  html[data-theme="dark"] .acbox{background:var(--card)}
+  html[data-theme="dark"] tbody tr.silber{background:#2a2d24}
+  html[data-theme="dark"] .badge.off{background:var(--stripe);color:var(--muted)}
+  html[data-theme="dark"] .medal.none{background:#3b4852}
+  html[data-theme="dark"] .silberbar{background:linear-gradient(90deg,#232f37,#1a242b)}
+  html[data-theme="dark"] th.grp{border-bottom-color:#4a3d24}
+  html[data-theme="dark"] .toast{background:#05090b;color:#fff}
+  html[data-theme="dark"] .statsum{border-color:#245043}
+  html[data-theme="dark"] .calbadge.bd{background:#4a3418;color:#e6b978}
+  html[data-theme="dark"] .calbadge.rep{background:#233648;color:#9dc0e6}
+  html[data-theme="dark"] .triptable tr.caltoday td{background:rgba(79,187,156,.14)}
+  /* QR-Code muss weiß bleiben, damit er scanbar ist */
+  html[data-theme="dark"] .qrbox{background:#fff}
+
+  /* Umschalter-Button */
+  .themebtn{position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom) + 12px);z-index:70;
+    width:44px;height:44px;border-radius:50%;border:1px solid var(--line-strong);
+    background:var(--card);color:var(--ink);box-shadow:var(--shadow);cursor:pointer;
+    font-size:1.15rem;line-height:1;display:grid;place-items:center;padding:0}
+  .themebtn:hover{border-color:var(--pine)}
+  @media print{.themebtn{display:none !important}}
 </style>
 </head>
 <body>
@@ -2255,6 +2321,23 @@
   if($("logPanel"))$("logPanel").addEventListener("toggle",()=>{ if($("logPanel").open)renderLog(); });
 
   boot();
+})();
+</script>
+
+<button id="themeToggle" class="themebtn" type="button" aria-label="Hell/Dunkel umschalten" title="Hell/Dunkel umschalten"></button>
+<script>
+(function(){
+  var root=document.documentElement, btn=document.getElementById("themeToggle");
+  function render(){ var dark=root.getAttribute("data-theme")==="dark";
+    btn.textContent=dark?"☀️":"🌙";
+    btn.setAttribute("title",dark?"Zum hellen Modus":"Zum dunklen Modus"); }
+  btn.addEventListener("click",function(){
+    var next=root.getAttribute("data-theme")==="dark"?"light":"dark";
+    root.setAttribute("data-theme",next);
+    try{localStorage.setItem("kkk58-theme",next);}catch(e){}
+    render();
+  });
+  render();
 })();
 </script>
 </body>
