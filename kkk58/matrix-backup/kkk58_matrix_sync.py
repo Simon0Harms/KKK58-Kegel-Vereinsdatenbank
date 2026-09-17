@@ -29,7 +29,7 @@ from datetime import datetime
 try:
     from nio import (
         AsyncClient, AsyncClientConfig, LoginResponse, RoomSendResponse,
-        RoomMessageText, RoomMessageNotice, RoomMessageEmote,
+        RoomInviteResponse, RoomMessageText, RoomMessageNotice, RoomMessageEmote,
     )
 except ImportError:
     sys.stderr.write(
@@ -562,6 +562,28 @@ class MatrixSync:
         if not isinstance(resp, RoomSendResponse):
             raise RuntimeError("room_send: " + repr(resp))
 
+    async def _invite_to_room(self, room, mxid):
+        """Eine Matrix-ID (@name:server) in einen Raum einladen. Alias auflösen und dem
+        Raum bei Bedarf beitreten. Ist der Nutzer bereits Mitglied oder schon eingeladen,
+        wird das als Erfolg gewertet (idempotent). Die Verschlüsselungspflicht gilt hier
+        NICHT – eine Einladung ist keine (Klartext-)Nachricht."""
+        rid = room
+        if isinstance(rid, str) and rid.startswith("#"):
+            r = await self.client.room_resolve_alias(rid)
+            rid = getattr(r, "room_id", None) or rid
+        if rid not in self.client.rooms:
+            await self.client.join(rid)
+            await self.client.sync(timeout=0)
+        resp = await self.client.room_invite(rid, mxid)
+        if isinstance(resp, RoomInviteResponse):
+            return
+        # Synapse meldet „bereits im Raum"/„bereits eingeladen" als M_FORBIDDEN – nicht neu versuchen.
+        status = getattr(resp, "status_code", "") or ""
+        text = (getattr(resp, "message", "") or "").lower()
+        if status == "M_FORBIDDEN" and ("already" in text or "in the room" in text or "invit" in text):
+            return
+        raise RuntimeError("room_invite: " + repr(resp))
+
     async def process_outbox(self):
         """Von der Node-App abgelegte Sende-Aufträge abarbeiten (Codes/Login-Links).
         Ein Auftrag = eine JSON-Datei; nach erfolgreichem Senden wird sie gelöscht."""
@@ -583,17 +605,41 @@ class MatrixSync:
                 self._safe_remove(fpath)
                 continue
             mid = str(msg.get("id") or name)
-            age = time.time() - (msg.get("createdAt", 0) / 1000)
-            if age > self.cfg.outbox_ttl:
-                self.log("Outbox: Auftrag zu alt, verworfen:", name)
-                self._safe_remove(fpath)
-                self._outbox_attempts.pop(mid, None)
-                continue
+            action = str(msg.get("action") or "text")
+            # TTL nur für zeitkritische Aufträge (Codes/Login-Links). Einladungen sind nicht
+            # zeitkritisch und sollen nicht verloren gehen, wenn der Sidecar länger als
+            # KKK_OUTBOX_TTL offline war – daher hier von der Altersprüfung ausgenommen.
+            if action != "invite":
+                age = time.time() - (msg.get("createdAt", 0) / 1000)
+                if age > self.cfg.outbox_ttl:
+                    self.log("Outbox: Auftrag zu alt, verworfen:", name)
+                    self._safe_remove(fpath)
+                    self._outbox_attempts.pop(mid, None)
+                    continue
             room = msg.get("roomId")
             # Sentinel der Node-App für den zentralen Vereinsraum: die App kennt dessen ID nicht
             # und legt "__club__" ab; hier durch den konfigurierten KKK_MATRIX_ROOM ersetzen.
             if room in ("__club__", "@club"):
                 room = self.room_id or self.cfg.room
+            if action == "invite":
+                mxid = msg.get("mxid")
+                if not room or not mxid:
+                    self._safe_remove(fpath)
+                    continue
+                try:
+                    await self._invite_to_room(room, mxid)
+                    self._safe_remove(fpath)
+                    self._outbox_attempts.pop(mid, None)
+                    self.log("Outbox: eingeladen", mxid, "->", room)
+                except Exception as e:
+                    n = self._outbox_attempts.get(mid, 0) + 1
+                    self._outbox_attempts[mid] = n
+                    self.log("Outbox: Einladung fehlgeschlagen (Versuch %d) %s -> %s: %s" % (n, mxid, room, repr(e)))
+                    if n >= self.cfg.outbox_max_attempts:
+                        self.log("Outbox: Einladung nach zu vielen Versuchen aufgegeben:", name)
+                        self._safe_remove(fpath)
+                        self._outbox_attempts.pop(mid, None)
+                continue
             body = msg.get("body")
             if not room or not body:
                 self._safe_remove(fpath)

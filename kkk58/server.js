@@ -448,6 +448,19 @@ function enqueueMatrix(roomId, body) {
     return true;
   } catch (e) { console.error('Matrix-Outbox-Fehler:', e.message); return false; }
 }
+// Einladungs-Auftrag für den Sidecar ablegen: die angegebene MXID in einen Raum einladen.
+// Gleiches Spool wie enqueueMatrix, aber mit action:'invite' statt einer Textnachricht.
+// Der Sidecar ersetzt den Sentinel '__club__' durch seinen konfigurierten KKK_MATRIX_ROOM.
+function enqueueMatrixInvite(roomId, mxid) {
+  try {
+    const id = Date.now().toString(36) + '-' + crypto.randomBytes(8).toString('hex');
+    const tmp = path.join(MATRIX_OUTBOX_DIR, '.' + id + '.tmp');
+    const fin = path.join(MATRIX_OUTBOX_DIR, id + '.json');
+    fs.writeFileSync(tmp, JSON.stringify({ id, action: 'invite', roomId: String(roomId), mxid: String(mxid), createdAt: Date.now() }), { mode: 0o600 });
+    fs.renameSync(tmp, fin);
+    return true;
+  } catch (e) { console.error('Matrix-Outbox-Fehler:', e.message); return false; }
+}
 function matrixInfo(user) {
   if (!user) return null;
   if (user.matrix && user.matrix.verified) return { roomId: user.matrix.roomId, mxid: user.matrix.mxid || null, verified: true };
@@ -1066,9 +1079,17 @@ function applyOp(op, user) {
       const r = db.roster.find(x => x.id === Number(op.id)); if (!r) return null;
       const patch = normContact(op.fields || {});
       const fields = {};
+      const prevMxid = String(r.mxid || '');
       // nur die tatsächlich übergebenen Felder ändern
       for (const k of CONTACT_KEYS) { if (op.fields && Object.prototype.hasOwnProperty.call(op.fields, k)) { r[k] = patch[k]; fields[k] = patch[k]; } }
       if (Object.keys(fields).length === 0) return null;
+      // Neu eingetragene oder geänderte MXID im Verzeichnis => automatische Einladung
+      // in den Vereinsraum (nur bei gültiger, tatsächlich veränderter, nicht-leerer MXID;
+      // ein Leeren des Feldes oder eine unveränderte MXID lösen keine Einladung aus).
+      if (Object.prototype.hasOwnProperty.call(fields, 'mxid')) {
+        const mx = validMxid(fields.mxid);
+        if (mx && mx.toLowerCase() !== prevMxid.toLowerCase()) enqueueMatrixInvite(clubRoom(), mx);
+      }
       return { type: 'setRosterContact', id: r.id, fields };
     }
     case 'removeRoster': { if (!canManage(user.role)) return null; const b = db.roster.length; db.roster = db.roster.filter(x => x.id !== Number(op.id)); if (db.roster.length === b) return null; db.users.forEach(u => { if (u.rosterId === Number(op.id)) u.rosterId = null; }); return { type: 'removeRoster', id: Number(op.id) }; }

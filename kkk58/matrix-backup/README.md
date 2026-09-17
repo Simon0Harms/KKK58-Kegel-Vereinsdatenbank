@@ -65,16 +65,32 @@ App zu (Verknüpfungscodes und zeitlich begrenzte Login-Links). Damit die
 abhängigkeitsfreie Node-App nicht selbst mit Matrix sprechen muss, läuft die
 Kommunikation über einen **Datei-Spool**:
 
-- Die Node-App legt jeden Sende-Auftrag als einzelne JSON-Datei im Verzeichnis
+- Die Node-App legt jeden Auftrag als einzelne JSON-Datei im Verzeichnis
   `KKK_OUTBOX_DIR` ab (Standard: `<db-Verzeichnis>/matrix-outbox`, also neben
-  `data/db.json`). Ein Auftrag enthält Ziel-Raum und Nachrichtentext.
-- Der Sidecar arbeitet den Spool bei jedem Poll-Durchlauf ab: er sendet die Nachricht
-  **verschlüsselt** in den jeweiligen Raum und **löscht** die Datei nach Erfolg.
+  `data/db.json`). Es gibt zwei Auftragsarten:
+  - **Textnachricht** (Standard, ohne `action`): Felder `roomId` und `body`; der
+    Sidecar sendet den Text **verschlüsselt** in den Raum.
+  - **Einladung** (`action: "invite"`): Felder `roomId` und `mxid`; der Sidecar
+    lädt die angegebene Matrix-ID in den Raum ein (`room_invite`).
+- Der Sidecar arbeitet den Spool bei jedem Poll-Durchlauf ab und **löscht** die Datei
+  nach Erfolg.
 - Aufträge, die älter als `KKK_OUTBOX_TTL` (Standard 900 s) sind, werden verworfen –
   die Codes/Links sind bis dahin ohnehin abgelaufen (Code 10 min, Login-Link 5 min).
+  **Einladungen sind davon ausgenommen** (nicht zeitkritisch) und bleiben erhalten,
+  bis sie zugestellt sind oder `KKK_OUTBOX_MAX_ATTEMPTS` erreicht ist.
 - Der Sidecar **nimmt Raum-Einladungen automatisch an**. So kann ein Mitglied im
   Matrix-Client einen 1:1-Chat mit dem Bot starten; sobald der Bot beigetreten ist,
   kann es dessen Raum-ID in der App unter **Name (oben) → Matrix-Login** hinterlegen.
+
+### Automatische Einladung in den Vereinsraum
+
+Trägt ein verwaltungsberechtigtes Konto im **Verzeichnis** bei einer Person unter
+**MXID** eine gültige Matrix-ID (`@name:server`) ein oder ändert sie, legt die
+Node-App automatisch einen `invite`-Auftrag für den zentralen Vereinsraum
+(`KKK_MATRIX_ROOM`) an. Der Sidecar lädt die MXID dann in diesen Raum ein.
+Leeren des Feldes oder eine unveränderte MXID lösen **keine** Einladung aus; ist die
+MXID bereits Mitglied/eingeladen, wird das als Erfolg gewertet (idempotent). Voraussetzung
+ist, dass der Bot im Vereinsraum das Recht hat, einzuladen.
 
 Wichtig: Der Node-Server braucht dafür eine korrekte öffentliche Basis-URL, damit der
 Login-Link absolut ist. Setze in der Umgebung der **Node-App** `KKK_PUBLIC_URL`
