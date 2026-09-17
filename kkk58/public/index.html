@@ -355,7 +355,23 @@
   .dderr{min-height:1.2em;margin-top:8px}
   .ddrow{display:flex;gap:8px;margin-top:14px}
   .ddrow .btn{flex:1;padding:12px;border-radius:9px;font-weight:700;font-size:1rem;cursor:pointer}
-  @media(max-width:560px){ .dirgrid{grid-template-columns:1fr} }
+  /* ===== Kegelorte-Dialog ===== */
+  .placedlg{max-width:560px}
+  .placeadd{display:grid;grid-template-columns:1fr auto;gap:8px;margin:14px 0 2px}
+  .login .placeadd input{width:100%;margin:0}
+  .placeadd #pl_new{grid-column:1;grid-row:1}
+  .placeadd #pl_newaddr{grid-column:1;grid-row:2}
+  .login .placeadd #pl_add{grid-column:2;grid-row:1 / span 2;width:auto;margin:0;padding:0 16px;white-space:nowrap;align-self:stretch}
+  .placelist{margin-top:12px;display:flex;flex-direction:column;gap:8px;max-height:44vh;overflow:auto;-webkit-overflow-scrolling:touch}
+  .placecard{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;border:1px solid var(--line);border-radius:11px;background:var(--card);padding:10px 12px}
+  .placecard .placeinfo{min-width:0;flex:1 1 180px}
+  .placecard .placename{font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .placecard.off .placename{color:var(--muted)}
+  .placecard .placeaddr{color:var(--muted);font-size:.82rem;margin-top:3px;overflow-wrap:anywhere}
+  .placeacts{display:flex;flex-wrap:wrap;gap:6px}
+  .login .placeacts button{width:auto;margin:0}
+  .placeempty{color:var(--muted);text-align:center;padding:22px 4px;border:1px dashed var(--line-strong);border-radius:11px;margin-top:12px}
+  @media(max-width:560px){ .dirgrid{grid-template-columns:1fr} .placeacts{width:100%} .login .placeacts button{flex:1 1 auto} }
 
   /* ===== Dark-Modus ===== */
   html[data-theme="dark"]{
@@ -854,18 +870,16 @@
 
 <!-- KEGELORTE: Verwaltungs-Dialog -->
 <div id="placedlg" class="ovl hidden">
-  <div class="login dirdlg">
+  <div class="login dirdlg placedlg">
     <div class="eyebrow">Kegelorte</div>
     <h1>Kegelorte verwalten</h1>
-    <div class="ddrow" style="margin:0 0 6px">
-      <input id="pl_new" type="text" placeholder="Neuer Kegelort, z. B. Kegelbahn Musterhausen" autocapitalize="words" maxlength="80" style="flex:1">
-      <button class="btn prim" id="pl_add" type="button">＋ Anlegen</button>
-    </div>
-    <div class="ddrow" style="margin:0 0 10px">
-      <input id="pl_newaddr" type="text" placeholder="Adresse (optional), z. B. Musterstr. 1, 12345 Musterhausen" autocapitalize="words" maxlength="200" style="flex:1">
+    <div class="placeadd">
+      <input id="pl_new" type="text" placeholder="Neuer Kegelort, z. B. Kegelbahn Musterhausen" autocapitalize="words" maxlength="80">
+      <input id="pl_newaddr" type="text" placeholder="Adresse (optional), z. B. Musterstr. 1, 12345 Musterhausen" autocapitalize="words" maxlength="200">
+      <button class="btn prim" id="pl_add" type="button">+ Anlegen</button>
     </div>
     <div class="dderr err" id="pl_err"></div>
-    <div id="placeList"></div>
+    <div id="placeList" class="placelist"></div>
     <p class="foot" id="placeFoot" style="text-align:left">Jede angemeldete Person kann Orte anlegen. Umbenennen, Deaktivieren und Löschen nur mit Verwaltungsrecht (Admin, Kassenwart, Mitglied). Deaktivierte Orte bleiben in der Statistik erhalten, lassen sich aber nicht mehr neu zuordnen. Beim Löschen bleiben bereits archivierte Spiele samt Ort erhalten.</p>
     <div class="ddrow">
       <button class="btn" id="pl_close" type="button">Schließen</button>
@@ -1864,16 +1878,19 @@
     toast('Konstellation vom letzten Mal übernommen: '+desc+'.');
   }
   function renderPlaceList(){ const box=$("placeList"); if(!box)return; const manage=!!(me&&effManage());
-    if(!places.length){ box.innerHTML='<div class="prizeempty">Noch keine Kegelorte angelegt.</div>'; return; }
-    const rows=placesSorted().map(p=>'<tr>'
-      +'<td class="l">'+esc(p.name)+(p.active?'':' <span class="badge">inaktiv</span>')
-        +(p.address?'<div class="calplace" style="margin-top:2px">📍 '+esc(p.address)+'</div>':'')+'</td>'
-      +(manage?('<td class="tactions"><button class="btn sm" type="button" data-pedit="'+p.id+'">Umbenennen</button> '
-        +'<button class="btn sm" type="button" data-paddr="'+p.id+'">Adresse</button> '
-        +'<button class="btn sm" type="button" data-ptog="'+p.id+'">'+(p.active?'Deaktivieren':'Aktivieren')+'</button> '
-        +'<button class="btn warn sm" type="button" data-pdel="'+p.id+'">Löschen</button></td>'):'<td></td>')
-      +'</tr>').join("");
-    box.innerHTML='<div class="tablewrap"><table class="triptable"><thead><tr><th class="l">Kegelort</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    if(!places.length){ box.innerHTML='<div class="placeempty">Noch keine Kegelorte angelegt.</div>'; return; }
+    box.innerHTML=placesSorted().map(p=>'<div class="placecard'+(p.active?'':' off')+'">'
+      +'<div class="placeinfo">'
+        +'<div class="placename">'+esc(p.name)+(p.active?'':' <span class="badge off">inaktiv</span>')+'</div>'
+        +(p.address?'<div class="placeaddr">📍 '+esc(p.address)+'</div>':'')
+      +'</div>'
+      +(manage?('<div class="placeacts">'
+        +'<button class="btn ghost sm" type="button" data-pedit="'+p.id+'">Umbenennen</button>'
+        +'<button class="btn ghost sm" type="button" data-paddr="'+p.id+'">Adresse</button>'
+        +'<button class="btn ghost sm" type="button" data-ptog="'+p.id+'">'+(p.active?'Deaktivieren':'Aktivieren')+'</button>'
+        +'<button class="btn warn sm" type="button" data-pdel="'+p.id+'">Löschen</button>'
+      +'</div>'):'')
+      +'</div>').join("");
     box.querySelectorAll('[data-pedit]').forEach(b=>b.addEventListener("click",()=>{ const p=places.find(x=>x.id===Number(b.dataset.pedit)); if(!p)return;
       const nm=prompt("Neuer Name für den Kegelort:",p.name); if(nm==null)return; const t=nm.trim(); if(!t){toast("Name darf nicht leer sein.");return;}
       opStruct({type:'renamePlace',id:p.id,name:t}); }));
