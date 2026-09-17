@@ -924,6 +924,12 @@
     <h1 id="ca_title">Termin bearbeiten</h1>
     <div class="dirgrid">
       <div class="fld"><label>Datum</label><input id="ca_date" type="date"></div>
+      <div class="fld"><label>Uhrzeit</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin-bottom:4px"><input id="ca_allday" type="checkbox" checked style="width:auto"> ganztägig</label>
+        <div id="ca_timewrap" style="display:none;align-items:center;gap:6px;flex-wrap:wrap">
+          <input id="ca_start" type="time" style="flex:0 0 auto"> <span class="muted2">bis</span> <input id="ca_end" type="time" style="flex:0 0 auto"> <span class="muted2">(optional)</span>
+        </div>
+      </div>
       <div class="fld"><label>Wiederholung</label>
         <select id="ca_repeat">
           <option value="none" selected>einmalig</option>
@@ -1951,6 +1957,8 @@
   // ---------- Kalender / Termine ----------
   let calEditId=null;
   const REPEAT_LABEL={none:"einmalig",weekly:"wöchentlich",biweekly:"alle zwei Wochen",monthly:"monatlich",yearly:"jährlich"};
+  // Anzeige der Uhrzeit: "" für ganztägig, sonst "HH:MM Uhr" bzw. "HH:MM–HH:MM Uhr".
+  function fmtEvTime(o){ if(!o||!o.startTime)return""; return o.endTime?(o.startTime+"–"+o.endTime+" Uhr"):(o.startTime+" Uhr"); }
   const WDAY=["So","Mo","Di","Mi","Do","Fr","Sa"];
   function calShowBd(){ const c=$("cal_show_bd"); return !c||c.checked; }
   function calToday(){ const d=new Date(); d.setHours(0,0,0,0); return d; }
@@ -1967,13 +1975,13 @@
       const until=(ev.repeat!=="none"&&ev.until)?parseYMD(ev.until):null;
       const plbl=evPlaceLabel(ev), pid=(ev.placeId!=null?ev.placeId:null);
       if(ev.repeat==="none"){
-        if(start>=today && start<=horizon) out.push({date:toYMD(start),d:new Date(start),text:ev.text,place:plbl,placeId:pid,kind:"event",repeat:"none",eid:ev.id});
+        if(start>=today && start<=horizon) out.push({date:toYMD(start),d:new Date(start),text:ev.text,place:plbl,placeId:pid,kind:"event",repeat:"none",eid:ev.id,startTime:ev.startTime||null,endTime:ev.endTime||null});
         return;
       }
       let cur=new Date(start), guard=0;
       while(cur<today && guard<6000){ const nx=stepRepeat(cur,ev.repeat); if(!nx)break; cur=nx; guard++; }
       while(cur<=horizon && (!until||cur<=until) && guard<6000){
-        out.push({date:toYMD(cur),d:new Date(cur),text:ev.text,place:plbl,placeId:pid,kind:"event",repeat:ev.repeat,eid:ev.id});
+        out.push({date:toYMD(cur),d:new Date(cur),text:ev.text,place:plbl,placeId:pid,kind:"event",repeat:ev.repeat,eid:ev.id,startTime:ev.startTime||null,endTime:ev.endTime||null});
         const nx=stepRepeat(cur,ev.repeat); if(!nx)break; cur=nx; guard++;
       }
     });
@@ -1987,7 +1995,11 @@
         }
       });
     }
-    out.sort((a,b)=> a.date<b.date?-1 : a.date>b.date?1 : (a.kind==="birthday"?-1:1));
+    // Innerhalb eines Tages: Geburtstage/ganztägige Termine zuerst, danach nach Startuhrzeit.
+    out.sort((a,b)=>{ if(a.date!==b.date)return a.date<b.date?-1:1;
+      const ak=(a.kind==="birthday"||!a.startTime)?"":a.startTime, bk=(b.kind==="birthday"||!b.startTime)?"":b.startTime;
+      if(ak!==bk)return ak<bk?-1:1;
+      return (a.kind==="birthday"?-1:1); });
     return out;
   }
   function renderCal(){
@@ -2003,7 +2015,7 @@
         const place=o.place?' <span class="calplace">📍 '+esc(o.place)+'</span>':'';
         const dl=o.kind==="event"?'<button class="btn ghost sm" type="button" title="'+(o.repeat!=="none"?"Komplette Terminreihe als iCal (.ics) herunterladen":"Diesen Termin als iCal (.ics) herunterladen")+'" data-caical="'+o.eid+'">⬇ iCal'+(o.repeat!=="none"?" (Reihe)":"")+'</button>':'';
         return '<tr'+(isToday?' class="caltoday"':'')+'>'
-          +'<td class="ddate" style="white-space:nowrap">'+WDAY[o.d.getDay()]+' '+esc(fmtLeft(o.date))+(isToday?' <span class="calbadge today">heute</span>':'')+'</td>'
+          +'<td class="ddate" style="white-space:nowrap">'+WDAY[o.d.getDay()]+' '+esc(fmtLeft(o.date))+(fmtEvTime(o)?' <span class="muted2">'+esc(fmtEvTime(o))+'</span>':'')+(isToday?' <span class="calbadge today">heute</span>':'')+'</td>'
           +'<td class="dtext">'+esc(o.text)+' '+badge+place+'</td>'
           +'<td class="tactions">'+dl+'</td></tr>';
       }).join("");
@@ -2018,7 +2030,7 @@
     if(!events.length){ box.innerHTML='<h3 class="calh3">Termine verwalten</h3><div class="prizeempty">Noch keine Termine angelegt.</div>'; return; }
     const list=events.slice().sort((a,b)=> a.date<b.date?-1:a.date>b.date?1:0);
     const rows=list.map(e=>'<tr>'
-      +'<td class="ddate" style="white-space:nowrap">'+esc(fmtLeft(e.date))+'</td>'
+      +'<td class="ddate" style="white-space:nowrap">'+esc(fmtLeft(e.date))+(fmtEvTime(e)?'<br><span class="muted2">'+esc(fmtEvTime(e))+'</span>':' <span class="muted2">ganztägig</span>')+'</td>'
       +'<td class="dtext">'+esc(e.text)+((evPlaceLabel(e))?' <span class="calplace">📍 '+esc(evPlaceLabel(e))+'</span>':'')+'</td>'
       +'<td class="dcount">'+(e.repeat==="none"?'<span class="muted2">einmalig</span>':esc(REPEAT_LABEL[e.repeat])+(e.until?' bis '+esc(fmtLeft(e.until)):''))+'</td>'
       +'<td class="tactions"><button class="btn ghost sm" type="button" title="'+(e.repeat!=="none"?"Komplette Terminreihe als iCal (.ics) herunterladen":"Als iCal (.ics) herunterladen")+'" data-caical="'+e.id+'">⬇ iCal'+(e.repeat!=="none"?" (Reihe)":"")+'</button> <button class="btn sm" type="button" data-caedit="'+e.id+'">Bearbeiten</button> <button class="btn warn sm" type="button" data-cadel="'+e.id+'">Löschen</button></td>'
@@ -2045,6 +2057,11 @@
   function openCalEdit(id){ if(!(me&&effManage()))return; const ev=id!=null?events.find(x=>x.id===id):null; calEditId=id!=null?id:null;
     $("ca_title").textContent=ev?"Termin bearbeiten":"Neuer Termin"; $("ca_err").textContent="";
     $("ca_date").value=ev?(ev.date||""):toYMD(calToday());
+    const allday=ev?!ev.startTime:true;
+    $("ca_allday").checked=allday;
+    $("ca_start").value=(ev&&ev.startTime)?ev.startTime:"";
+    $("ca_end").value=(ev&&ev.endTime)?ev.endTime:"";
+    $("ca_timewrap").style.display=allday?"none":"flex";
     $("ca_text").value=ev?(ev.text||""):"";
     fillPlaceSelect($("ca_placeid"), ev&&ev.placeId!=null?ev.placeId:null);
     $("ca_place").value=ev?(ev.place||""):"";
@@ -2060,10 +2077,19 @@
     const text=$("ca_text").value.trim(); if(!text){ $("ca_err").textContent="Bitte eine Beschreibung eingeben."; return; }
     const place=$("ca_place").value.trim();
     const pv=$("ca_placeid").value; const placeId=pv===""?null:Number(pv);
+    // Uhrzeit: entweder ganztägig (kein Start) oder Startuhrzeit (Pflicht) + optionale Enduhrzeit.
+    let startTime=null, endTime=null;
+    if(!$("ca_allday").checked){
+      const s=$("ca_start").value; if(!/^\d{2}:\d{2}$/.test(s)){ $("ca_err").textContent="Bitte eine Startuhrzeit wählen oder „ganztägig“ aktivieren."; return; }
+      startTime=s;
+      const en=$("ca_end").value;
+      if(en){ if(!/^\d{2}:\d{2}$/.test(en)){ $("ca_err").textContent="Enduhrzeit ungültig."; return; }
+        if(en<=startTime){ $("ca_err").textContent="Die Enduhrzeit muss nach der Startuhrzeit liegen."; return; } endTime=en; }
+    }
     const repeat=$("ca_repeat").value; const untilRaw=$("ca_until").value; let until=null;
     if(repeat!=="none" && untilRaw){ if(!/^\d{4}-\d{2}-\d{2}$/.test(untilRaw)){ $("ca_err").textContent="Enddatum ungültig."; return; }
       if(untilRaw<date){ $("ca_err").textContent="Das Enddatum darf nicht vor dem Startdatum liegen."; return; } until=untilRaw; }
-    const event={ date, text, place, placeId, repeat, until };
+    const event={ date, text, place, placeId, startTime, endTime, repeat, until };
     if(calEditId!=null) opStruct({type:'updateEvent',id:calEditId,event});
     else opStruct({type:'addEvent',event});
     closeCalEdit(); toast("Gespeichert.");
@@ -2071,25 +2097,37 @@
   $("cal_add").addEventListener("click",()=>openCalEdit(null));
   $("cal_show_bd").addEventListener("change",renderCal);
   $("ca_repeat").addEventListener("change",()=>{ $("ca_untilwrap").style.display=($("ca_repeat").value!=="none")?"":"none"; });
+  $("ca_allday").addEventListener("change",()=>{ const on=!$("ca_allday").checked; $("ca_timewrap").style.display=on?"flex":"none"; if(on&&!$("ca_start").value)$("ca_start").value="19:00"; });
   $("ca_save").addEventListener("click",saveCalEdit);
   $("ca_cancel").addEventListener("click",closeCalEdit);
   $("caldlg").addEventListener("click",e=>{ if(e.target===$("caldlg"))closeCalEdit(); });
 
   // iCal / .ics-Export (abhängigkeitsfrei; Herunterladen dürfen alle Angemeldeten, auch „beschränkt").
-  // Ganztägige Termine (VALUE=DATE); Wiederholungen als RRULE, damit sie im eigenen Kalender wiederkehren.
+  // Ganztägige Termine als VALUE=DATE; getimte Termine als lokale Zeit ohne Zeitzone
+  // (floating time – wird vom Kalender als Ortszeit interpretiert; passend für den Verein
+  // im selben Zeitraum, spart eine VTIMEZONE-Definition). Ohne Enduhrzeit wird kein DTEND
+  // gesetzt (Zeitpunkt-Termin). Wiederholungen als RRULE, damit sie im Kalender wiederkehren.
+  function icsTime(t){ return String(t||"").replace(":","")+"00"; }
   function icsEsc(s){ return String(s==null?"":s).replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\r?\n/g,"\\n"); }
   function icsDate(ymd){ return String(ymd||"").replace(/-/g,""); }
   function icsStampNow(){ const d=new Date(); const z=n=>String(n).padStart(2,"0"); return d.getUTCFullYear()+z(d.getUTCMonth()+1)+z(d.getUTCDate())+"T"+z(d.getUTCHours())+z(d.getUTCMinutes())+z(d.getUTCSeconds())+"Z"; }
   function icsAddDay(ymd){ const d=parseYMD(ymd); if(!d)return icsDate(ymd); d.setDate(d.getDate()+1); return icsDate(toYMD(d)); }
   const ICS_FREQ={weekly:"WEEKLY",biweekly:"WEEKLY",monthly:"MONTHLY",yearly:"YEARLY"};
-  function icsRRule(ev){ const f=ICS_FREQ[ev.repeat]; if(!f)return null; let r="RRULE:FREQ="+f; if(ev.repeat==="biweekly")r+=";INTERVAL=2"; if(ev.until)r+=";UNTIL="+icsAddDay(ev.until); return r; }
+  function icsRRule(ev){ const f=ICS_FREQ[ev.repeat]; if(!f)return null; let r="RRULE:FREQ="+f; if(ev.repeat==="biweekly")r+=";INTERVAL=2";
+    // UNTIL muss zum DTSTART-Typ passen: bei getimten Terminen als (floating) DATE-TIME.
+    if(ev.until)r+=";UNTIL="+(ev.startTime?(icsDate(ev.until)+"T235959"):icsAddDay(ev.until)); return r; }
   function icsHost(){ return (location.host||"kkk58").replace(/[^\w.-]/g,"-")||"kkk58"; }
   function icsVevent(ev){
     let v="BEGIN:VEVENT\r\n";
     v+="UID:kkk58-event-"+ev.id+"@"+icsHost()+"\r\n";
     v+="DTSTAMP:"+icsStampNow()+"\r\n";
-    v+="DTSTART;VALUE=DATE:"+icsDate(ev.date)+"\r\n";
-    v+="DTEND;VALUE=DATE:"+icsAddDay(ev.date)+"\r\n";
+    if(ev.startTime){
+      v+="DTSTART:"+icsDate(ev.date)+"T"+icsTime(ev.startTime)+"\r\n";
+      if(ev.endTime)v+="DTEND:"+icsDate(ev.date)+"T"+icsTime(ev.endTime)+"\r\n";
+    } else {
+      v+="DTSTART;VALUE=DATE:"+icsDate(ev.date)+"\r\n";
+      v+="DTEND;VALUE=DATE:"+icsAddDay(ev.date)+"\r\n";
+    }
     v+="SUMMARY:"+icsEsc(ev.text)+"\r\n";
     const _lp=evPlace(ev); const _pn=_lp?_lp.name:((ev.placeId!=null&&ev.placeName)?ev.placeName:"");
     const loc=[_pn,evPlaceAddress(ev),ev.place].filter(Boolean).join(", ");

@@ -286,13 +286,31 @@ function seedDevelop() {
 // (none/weekly/monthly/yearly) und – nur bei Wiederholung – ein optionales Enddatum "until",
 // bis zu dem der Termin wiederkehrt (leer = ohne Ende). Die Geburtstage werden NICHT hier
 // gespeichert, sondern im Frontend aus dem Mitgliedsverzeichnis (geburtsdatum) abgeleitet.
+//
+// Uhrzeit: Ein Termin ist entweder ganztägig (startTime === null) ODER hat eine
+// Startuhrzeit (startTime "HH:MM") und optional eine Enduhrzeit (endTime "HH:MM").
+// endTime wird nur gespeichert, wenn eine startTime gesetzt ist und die Enduhrzeit
+// nach der Startuhrzeit liegt (Termine über Mitternacht werden nicht abgebildet).
+// Alt-Termine ohne Zeitfelder bleiben ganztägig (Migration über normTime -> null).
 const EVENT_TEXT_MAX = 200;
 const EVENT_PLACE_MAX = 120;
 const EVENT_REPEATS = ['none', 'weekly', 'biweekly', 'monthly', 'yearly'];
 function normEventRepeat(v) { return EVENT_REPEATS.indexOf(v) !== -1 ? v : 'none'; }
+// Uhrzeit "HH:MM" (00:00–23:59) normalisieren, sonst null.
+function normTime(v) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(v == null ? '' : v).trim());
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h > 23 || mi > 59) return null;
+  return String(h).padStart(2, '0') + ':' + String(mi).padStart(2, '0');
+}
 function normEvent(src) {
   const repeat = normEventRepeat(src && src.repeat);
   const pid = (src && src.placeId != null && src.placeId !== '') ? Number(src.placeId) : null;
+  const startTime = normTime(src && src.startTime);
+  // Enduhrzeit nur bei gesetzter Startuhrzeit und wenn sie echt nach dem Start liegt.
+  let endTime = startTime ? normTime(src && src.endTime) : null;
+  if (endTime && endTime <= startTime) endTime = null;
   return {
     id: (src && src.id != null) ? Number(src.id) : null,
     date: normDate(src && src.date),
@@ -302,6 +320,8 @@ function normEvent(src) {
     // placeName als Snapshot des Namens (bleibt lesbar, falls der Ort später gelöscht wird).
     placeId: (pid != null && isFinite(pid)) ? pid : null,
     placeName: String((src && src.placeName) || '').trim().slice(0, PLACE_NAME_MAX),
+    startTime,
+    endTime,
     repeat,
     until: repeat === 'none' ? null : normDate(src && src.until)
   };
@@ -1237,7 +1257,7 @@ function applyOp(op, user) {
       const cur = db.events.find(x => x.id === Number(op.id)); if (!cur) return null;
       const e = normEvent(Object.assign({}, op.event, { id: cur.id })); if (!e.date || !e.text) return null;
       resolveEventPlace(e);
-      cur.date = e.date; cur.text = e.text; cur.place = e.place; cur.placeId = e.placeId; cur.placeName = e.placeName; cur.repeat = e.repeat; cur.until = e.until;
+      cur.date = e.date; cur.text = e.text; cur.place = e.place; cur.placeId = e.placeId; cur.placeName = e.placeName; cur.startTime = e.startTime; cur.endTime = e.endTime; cur.repeat = e.repeat; cur.until = e.until;
       return { type: 'updateEvent', id: cur.id, event: cur };
     }
     case 'removeEvent': {

@@ -598,6 +598,10 @@ umfasst die nächsten **12 Monate**.
   automatisch abgeleitet aus dem Feld `geburtsdatum` im **Mitgliedsverzeichnis** (mit Angabe, welches
   Alter erreicht wird). Über den Schalter **„Geburtstage"** lassen sie sich aus- und einblenden.
   Gepflegt werden die Geburtstage im Verzeichnis, nicht im Kalender.
+- **Uhrzeit:** Ein Termin ist entweder **ganztägig** (Voreinstellung) **oder** hat eine
+  **Startuhrzeit** und – optional – eine **Enduhrzeit**. Ohne Häkchen bei „ganztägig" wird die
+  Startuhrzeit zur Pflicht; eine angegebene Enduhrzeit muss nach der Startuhrzeit liegen (Termine
+  über Mitternacht werden nicht abgebildet). Die Uhrzeit erscheint in der Liste und im iCal-Export.
 - **Ort:** Je Termin lässt sich optional ein **Ort** angeben (z. B. „Kegelbahn LTSV"); er erscheint
   in der Liste und im iCal-Export (`LOCATION`).
 - **Termine anlegen/bearbeiten/löschen:** Nur mit **Verwaltungsrecht** (Admin, Kassenwart, Mitglied)
@@ -614,10 +618,14 @@ umfasst die nächsten **12 Monate**.
   wenn deren Anzeige eingeschaltet ist). Bei einem **wiederkehrenden Termin** wird stets die
   **komplette Terminreihe** exportiert (als **RRULE**, nicht nur das angeklickte Vorkommen) – der
   Button ist dort mit **„⬇ iCal (Reihe)"** gekennzeichnet. Ganztagestermine werden als
-  `VALUE=DATE` exportiert; die Datei wird abhängigkeitsfrei im Browser erzeugt.
+  `VALUE=DATE` exportiert; **getimte Termine** als lokale Zeit ohne Zeitzone (*floating time*,
+  wird vom Kalender als Ortszeit gelesen – spart eine `VTIMEZONE`-Definition und passt für den
+  Verein im selben Zeitraum). Ohne Enduhrzeit wird **kein `DTEND`** gesetzt (Zeitpunkt-Termin).
+  Die Datei wird abhängigkeitsfrei im Browser erzeugt.
 
-Speicherung als `events`/`seqEvents` in `data/db.json` (Felder `date`, `text`, `place`, `repeat`,
-`until`); Änderungen laufen über die Live-Sync-Operationen `addEvent` / `updateEvent` /
+Speicherung als `events`/`seqEvents` in `data/db.json` (Felder `date`, `text`, `place`,
+`startTime`, `endTime`, `repeat`, `until`; `startTime === null` = ganztägig); Änderungen laufen
+über die Live-Sync-Operationen `addEvent` / `updateEvent` /
 `removeEvent` und erscheinen sofort bei allen angemeldeten Mitgliedern. Beim Update einer
 bestehenden Datenbank ohne diese Felder startet der Kalender leer.
 
