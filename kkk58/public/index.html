@@ -51,6 +51,20 @@
   .mxintro{color:var(--muted);font-size:.85rem;margin:0 0 8px}
   .mxhint{color:var(--muted);font-size:.76rem;margin:6px 0 0}
   .mxroom{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+  .mxf-wrap{margin-top:14px}
+  .mxfeed{max-height:60vh;overflow-y:auto;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card);display:flex;flex-direction:column;gap:8px;-webkit-overflow-scrolling:touch}
+  .mxf-row{display:flex;flex-direction:column;gap:2px}
+  .mxf-head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+  .mxf-name{font-weight:700;font-size:.82rem;color:var(--ink)}
+  .mxf-time{font-size:.7rem;color:var(--muted)}
+  .mxf-body{font-size:.9rem;color:var(--ink);white-space:pre-wrap;word-break:break-word;line-height:1.35}
+  .mxf-row.emote .mxf-body{font-style:italic;color:var(--muted)}
+  .mxf-load{align-self:center;font-size:.76rem;color:var(--muted);padding:4px 0}
+  .mxf-empty{color:var(--muted);font-size:.85rem;text-align:center;padding:16px 0}
+  .mxf-compose{display:flex;gap:8px;margin-top:10px;align-items:flex-end}
+  .mxf-input{flex:1;resize:vertical;min-height:38px;max-height:160px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;font:inherit;background:var(--card);color:var(--ink)}
+  .mxf-note{font-size:.76rem;color:var(--muted);margin:6px 0 0;min-height:1em}
+  .mxf-note.err{color:#b23}
   .ovl{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;padding:8vh 16px;z-index:80}
   .ovl .login{margin:0;width:100%;max-width:360px}
   .qrbox{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff}
@@ -550,6 +564,7 @@
       <button id="nav_develop" type="button">Chronik</button>
       <button id="nav_cal" type="button">Kalender</button>
       <button id="nav_polls" type="button">Abstimmungen</button>
+      <button id="nav_matrix" type="button">Matrix-Raum</button>
       <button id="nav_cash" type="button" class="hidden">Kasse</button>
       <div class="btnrow" id="sheetBtns">
         <button id="btn_focus" type="button" title="Nur die Liste anzeigen (Menü ausblenden)">⛶ Nur Liste</button>
@@ -736,6 +751,24 @@
     </div>
     <div id="pollList" class="polllist"></div>
     <p class="foot" id="pollFoot" style="text-align:left">Jedes angemeldete Mitglied kann eine Abstimmung starten und mit Ja oder Nein antworten. Neue Abstimmungen werden im Matrix-Vereinsraum angekündigt; wöchentlich wird an alle erinnert, die noch nicht abgestimmt haben.</p>
+  </section>
+
+  <!-- ===== MATRIX-RAUM ===== -->
+  <section id="view_matrix" class="hidden">
+    <div class="dirbar">
+      <span class="prizeintro">Der Matrix-Vereinsraum – hier laufen Ankündigungen und Abstimmungs-Erinnerungen des Vereins zusammen.</span>
+    </div>
+    <div id="matrixBox"></div>
+    <div class="mxf-wrap">
+      <div id="matrixFeed" class="mxfeed" aria-live="polite"></div>
+      <form id="mxForm" class="mxf-compose" autocomplete="off">
+        <textarea id="mxInput" class="mxf-input" rows="1" maxlength="2000" placeholder="Nachricht an den Vereinsraum…"></textarea>
+        <button id="mxSend" class="btn prim" type="submit">Senden</button>
+      </form>
+      <p class="mxf-note" id="mxNote"></p>
+      <p class="mxhint">Deine Nachricht stellt der Vereins-Bot als „<em>Dein Name</em>: Nachricht" in den Matrix-Raum (ist deinem Konto kein Stammname zugeordnet, wird dein Benutzername verwendet). Sie erscheint gleich im Verlauf. Der Verlauf beginnt ab dem Zeitpunkt, ab dem der Bot mitliest.</p>
+    </div>
+    <p class="foot" style="text-align:left">Öffne den Raum in deiner Matrix-App (z. B. Element). Wenn du noch keine hast, kannst du dich unter <span class="mxroom">app.element.io</span> im Browser anmelden und dann den Raum betreten.</p>
   </section>
 
   <!-- ===== KALENDER / TERMINE ===== -->
@@ -948,7 +981,7 @@
   const canManage=r=>r==="admin"||r==="kassenwart"||r==="mitglied";
   const canCash=r=>r==="admin"||r==="kassenwart";
   const roleLabel=r=>ROLE_LABEL[r]||r;
-  let me=null, state=null, roster=[], places=[], prizes=[], trips=[], develop=[], events=[], polls=[], version=0, es=null, currentView="sheet", sortMode="arrival", lastBahnen=null;
+  let me=null, state=null, roster=[], places=[], prizes=[], trips=[], develop=[], events=[], polls=[], version=0, es=null, currentView="sheet", sortMode="arrival", lastBahnen=null, matrixRoom=null;
   const pending=new Set();
   const rid=()=> (crypto.randomUUID? crypto.randomUUID() : String(Date.now())+Math.random());
   const $=id=>document.getElementById(id);
@@ -1147,7 +1180,7 @@
   $("pw_new2").addEventListener("keydown",e=>{if(e.key==='Enter')submitPw();});
 
   async function loadState(){ const r=await api('/state');
-    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; places=r.data.places||[]; lastBahnen=r.data.lastBahnen||null; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; events=r.data.events||[]; polls=r.data.polls||[]; version=r.data.version; me=r.data.me||me; pending.clear(); rebuildDatalist(); renderPlaceSelect(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog();
+    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; places=r.data.places||[]; lastBahnen=r.data.lastBahnen||null; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; events=r.data.events||[]; polls=r.data.polls||[]; version=r.data.version; me=r.data.me||me; matrixRoom=r.data.matrixRoom||null; pending.clear(); rebuildDatalist(); renderPlaceSelect(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog();
       if(me&&me.mustChangePassword&&$("pwdlg").classList.contains("hidden")) openPwDialog(); }
     else if(r.status===401) showLogin(); }
   function resync(){ loadState(); }
@@ -1165,6 +1198,7 @@
     $("view_develop").classList.toggle("hidden",v!=="develop");
     $("view_cal").classList.toggle("hidden",v!=="cal");
     $("view_polls").classList.toggle("hidden",v!=="polls");
+    $("view_matrix").classList.toggle("hidden",v!=="matrix");
     $("sheetBtns").style.display = v==="sheet" ? "" : "none";
     $("nav_sheet").classList.toggle("active",v==="sheet");
     $("nav_archive").classList.toggle("active",v==="archive");
@@ -1176,6 +1210,7 @@
     $("nav_develop").classList.toggle("active",v==="develop");
     $("nav_cal").classList.toggle("active",v==="cal");
     $("nav_polls").classList.toggle("active",v==="polls");
+    $("nav_matrix").classList.toggle("active",v==="matrix");
     if(v==="archive") loadArchive();
     if(v==="stats") loadStats();
     if(v==="cash") loadCash();
@@ -1185,6 +1220,7 @@
     if(v==="develop") renderDevelop();
     if(v==="cal") renderCal();
     if(v==="polls") renderPolls();
+    if(v==="matrix") renderMatrix(); else mxStopPoll();
   }
   // Fokus-Modus: nur die Liste zum Eintragen (Menü/Kopf ausgeblendet)
   function updateFocusMeta(){ const ev=($("f_event").value||"").trim(), dt=$("f_date").value||""; const pl=(state&&state.placeId!=null)?((places.find(p=>p.id===state.placeId)||{}).name||""):""; $("fbMeta").textContent=[ev,dt,pl].filter(Boolean).join(" · "); }
@@ -1199,6 +1235,15 @@
   $("nav_develop").addEventListener("click",()=>setView("develop"));
   $("nav_cal").addEventListener("click",()=>setView("cal"));
   $("nav_polls").addEventListener("click",()=>setView("polls"));
+  $("nav_matrix").addEventListener("click",()=>setView("matrix"));
+  (function(){
+    const form=$("mxForm"), inp=$("mxInput");
+    if(form) form.addEventListener("submit",e=>{ e.preventDefault(); mxSend(); });
+    if(inp){
+      inp.addEventListener("input",()=>mxAutoGrow(inp));
+      inp.addEventListener("keydown",e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); mxSend(); } });
+    }
+  })();
   $("rvSeg").addEventListener("click",e=>{ const b=e.target.closest("button[data-vr]"); if(b)setViewRole(b.dataset.vr); });
   $("btn_focus").addEventListener("click",()=>setFocus(true));
   $("fb_exit").addEventListener("click",()=>setFocus(false));
@@ -2049,6 +2094,130 @@
       h+='<button class="btn warn sm" type="button" data-pdel="'+p.id+'">Löschen</button></div>'; }
     h+='</div>'; return h;
   }
+  function renderMatrix(){
+    const box=$("matrixBox");
+    if(box){
+      if(!matrixRoom||!matrixRoom.address){
+        box.innerHTML='<p class="mxintro">Es ist kein Matrix-Vereinsraum konfiguriert. Ein Administrator kann ihn über die Sidecar-Datei (<span class="mxroom">KKK_MATRIX_ROOM</span>) festlegen.</p>';
+      } else {
+        const addr=matrixRoom.address, url=matrixRoom.url||('https://matrix.to/#/'+addr);
+        box.innerHTML=
+          '<p class="mxintro">Raum-Adresse:</p>'+
+          '<p class="mxroom" style="font-size:1rem">'+esc(addr)+'</p>'+
+          '<p style="margin:12px 0"><a class="btn prim" href="'+esc(url)+'" target="_blank" rel="noopener">Raum in Matrix öffnen</a> '+
+          '<button class="btn sm" type="button" id="mxCopy">Adresse kopieren</button></p>'+
+          '<div class="qrbox" style="max-width:240px"><img alt="QR-Code zum Beitreten" src="'+BASE+'/api/qr?data='+encodeURIComponent(url)+'"><p class="mxhint" style="text-align:center">QR-Code scannen, um dem Raum beizutreten</p></div>';
+        const cp=$("mxCopy");
+        if(cp) cp.addEventListener("click",()=>{ try{ navigator.clipboard.writeText(addr); cp.textContent="Kopiert ✓"; setTimeout(()=>{cp.textContent="Adresse kopieren";},1500); }catch(_){}});
+      }
+    }
+    mxBootFeed();
+  }
+
+  // ---------- Matrix-Raum: Nachrichten-Feed (read-only, Endlos-Scroll) ----------
+  let mxFirstSeq=null, mxLatestSeq=null, mxHasMore=false, mxLoading=false, mxPollTimer=null, mxScrollBound=false;
+  function mxTime(ts){ try{ return new Date(ts).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(_){ return ''; } }
+  function mxMsgEl(m){
+    const row=document.createElement('div');
+    row.className='mxf-row'+(m.type==='m.emote'?' emote':'');
+    row.dataset.seq=m.seq;
+    const head=document.createElement('div'); head.className='mxf-head';
+    const nm=document.createElement('span'); nm.className='mxf-name'; nm.textContent=(m.name||m.sender||'?');
+    const tm=document.createElement('span'); tm.className='mxf-time'; tm.textContent=mxTime(m.ts);
+    head.appendChild(nm); head.appendChild(tm);
+    const body=document.createElement('div'); body.className='mxf-body';
+    body.textContent=(m.type==='m.emote'?('* '+(m.body||'')):(m.body||''));
+    row.appendChild(head); row.appendChild(body);
+    return row;
+  }
+  function mxNearBottom(feed){ return feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60; }
+  function mxBootFeed(){
+    const feed=$("matrixFeed"); if(!feed) return;
+    mxStopPoll();
+    mxFirstSeq=null; mxLatestSeq=null; mxHasMore=false; mxLoading=false;
+    feed.innerHTML='<div class="mxf-empty">Lädt…</div>';
+    if(!mxScrollBound){
+      feed.addEventListener('scroll',()=>{ if(feed.scrollTop<40) mxLoadOlder(); });
+      mxScrollBound=true;
+    }
+    mxLoadInitial();
+  }
+  async function mxLoadInitial(){
+    const feed=$("matrixFeed"); if(!feed) return;
+    mxLoading=true;
+    const r=await api("/matrix/messages?limit=30");
+    mxLoading=false;
+    if(!r.ok||!r.data){ feed.innerHTML='<div class="mxf-empty">Nachrichten konnten nicht geladen werden.</div>'; return; }
+    const msgs=r.data.messages||[];
+    feed.innerHTML='';
+    if(!msgs.length){ feed.innerHTML='<div class="mxf-empty">Noch keine Nachrichten im Raum.</div>'; mxLatestSeq=r.data.latestSeq!=null?r.data.latestSeq:null; mxStartPoll(); return; }
+    msgs.forEach(m=>feed.appendChild(mxMsgEl(m)));
+    mxFirstSeq=r.data.firstSeq; mxHasMore=!!r.data.hasMore;
+    mxLatestSeq=msgs[msgs.length-1].seq;
+    mxUpdateLoadHint(feed);
+    feed.scrollTop=feed.scrollHeight; // ans Ende (neueste) scrollen
+    mxStartPoll();
+  }
+  function mxUpdateLoadHint(feed){
+    let hint=feed.querySelector('.mxf-load');
+    if(mxHasMore){
+      if(!hint){ hint=document.createElement('div'); hint.className='mxf-load'; hint.textContent='Nach oben scrollen für ältere Nachrichten'; feed.insertBefore(hint, feed.firstChild); }
+    } else if(hint){ hint.remove(); }
+  }
+  async function mxLoadOlder(){
+    const feed=$("matrixFeed"); if(!feed||mxLoading||!mxHasMore||mxFirstSeq==null) return;
+    mxLoading=true;
+    const prevH=feed.scrollHeight, prevTop=feed.scrollTop;
+    const r=await api("/matrix/messages?before="+encodeURIComponent(mxFirstSeq)+"&limit=30");
+    mxLoading=false;
+    if(!r.ok||!r.data){ return; }
+    const msgs=r.data.messages||[];
+    const oldHint=feed.querySelector('.mxf-load'); if(oldHint) oldHint.remove();
+    for(let i=msgs.length-1;i>=0;i--){ feed.insertBefore(mxMsgEl(msgs[i]), feed.firstChild); }
+    if(msgs.length) mxFirstSeq=r.data.firstSeq;
+    mxHasMore=!!r.data.hasMore;
+    mxUpdateLoadHint(feed);
+    // Scrollposition erhalten: um die Höhe der neu eingefügten Nachrichten korrigieren
+    feed.scrollTop = prevTop + (feed.scrollHeight - prevH);
+  }
+  async function mxPoll(){
+    const feed=$("matrixFeed"); if(!feed) return;
+    if(mxLoading||mxLatestSeq==null) return;
+    const r=await api("/matrix/messages?after="+encodeURIComponent(mxLatestSeq));
+    if(!r.ok||!r.data) return;
+    const msgs=r.data.messages||[];
+    if(!msgs.length){ if(r.data.latestSeq!=null) mxLatestSeq=Math.max(mxLatestSeq, r.data.latestSeq); return; }
+    const empty=feed.querySelector('.mxf-empty'); if(empty) empty.remove();
+    const stick=mxNearBottom(feed);
+    msgs.forEach(m=>feed.appendChild(mxMsgEl(m)));
+    mxLatestSeq=msgs[msgs.length-1].seq;
+    if(mxFirstSeq==null){ mxFirstSeq=msgs[0].seq; mxHasMore=!!r.data.hasMore; mxUpdateLoadHint(feed); }
+    if(stick) feed.scrollTop=feed.scrollHeight;
+  }
+  function mxStartPoll(){ mxStopPoll(); mxPollTimer=setInterval(mxPoll, 20000); }
+  function mxStopPoll(){ if(mxPollTimer){ clearInterval(mxPollTimer); mxPollTimer=null; } }
+  function mxNote(msg, isErr){ const n=$("mxNote"); if(!n)return; n.textContent=msg||''; n.classList.toggle('err',!!isErr); }
+  async function mxSend(){
+    const inp=$("mxInput"), btn=$("mxSend"); if(!inp||!btn) return;
+    const text=(inp.value||'').trim();
+    if(!text){ inp.focus(); return; }
+    btn.disabled=true; inp.disabled=true; mxNote('Senden…',false);
+    let r;
+    try{ r=await api("/matrix/say",{method:'POST',body:{text}}); }
+    catch(_){ r={ok:false}; }
+    btn.disabled=false; inp.disabled=false;
+    if(r&&r.ok){
+      inp.value=''; mxAutoGrow(inp); inp.focus();
+      mxNote('Gesendet – erscheint gleich im Verlauf.',false);
+      // Die Nachricht läuft über den Sidecar (Outbox) und taucht mit kurzer Verzögerung
+      // im Feed auf – ein paar gezielte Abrufe holen sie zeitnah nach.
+      [1500,4000,9000,16000].forEach(t=>setTimeout(()=>{ if(currentView==='matrix') mxPoll(); }, t));
+    } else {
+      const msg=(r&&r.data&&r.data.error)?r.data.error:'Senden fehlgeschlagen.';
+      mxNote(msg,true);
+    }
+  }
+  function mxAutoGrow(el){ if(!el)return; el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,160)+'px'; }
   function renderPolls(){ const box=$("pollList"); if(!box)return;
     const showClosed=$("poll_show_closed")&&$("poll_show_closed").checked;
     const list=pollsSorted().filter(p=>showClosed||!p.closed);

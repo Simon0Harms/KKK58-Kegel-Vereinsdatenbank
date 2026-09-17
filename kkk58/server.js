@@ -31,6 +31,16 @@ const PUBLIC_URL = String(process.env.KKK_PUBLIC_URL || '').replace(/\/+$/, '');
 // Sidecar den Raum kennt: dann wird der Sentinel '__club__' abgelegt und der Sidecar ersetzt
 // ihn durch seinen KKK_MATRIX_ROOM. Alternativ hier direkt eine Raum-ID (!id:server) setzen.
 const CLUB_ROOM_ENV = String(process.env.KKK_CLUB_ROOM || '').trim();
+// Öffentlich anzeigbarer Matrix-Vereinsraum (Adresse für die Unterseite „Matrix-Raum").
+// Quelle in dieser Reihenfolge: explizit gesetztes KKK_MATRIX_ROOM > Wert aus der Sidecar-
+// Env-Datei (KKK_MATRIX_ENV_FILE) > KKK_CLUB_ROOM. So genügt es, den Raum einmal beim
+// Sidecar zu pflegen; die Node-App liest ihn von dort mit.
+const MATRIX_ENV_FILE = String(process.env.KKK_MATRIX_ENV_FILE || '/opt/kkk58/matrix-backup/kkk58-matrix.env').trim();
+// Vom Matrix-Sidecar geschriebener Nachrichten-Feed (JSONL, eine Nachricht je Zeile,
+// chronologisch). Nur lesend genutzt für die Unterseite „Matrix-Raum". Muss mit dem
+// KKK_FEED_FILE des Sidecars übereinstimmen. Standard: <DATA_DIR>/matrix-feed.jsonl
+const MATRIX_FEED_FILE = String(process.env.KKK_FEED_FILE || path.join(DATA_DIR, 'matrix-feed.jsonl')).trim();
+const MATRIX_SAY_MAX = 2000;  // max. Zeichen je Relay-Nachricht aus der Webapp in den Raum
 const POLL_REMINDER_INTERVAL = 7 * 864e5; // wöchentlich an offene Stimmen erinnern
 const MAX = 180;
 const MATRIX_CODE_TTL = 10 * 60 * 1000; // Verknüpfungscode: 10 Minuten gültig
@@ -492,6 +502,63 @@ function pollLink() { return PUBLIC_URL ? PUBLIC_URL + '/' : null; }
 // Zielraum für die Vereins-Ankündigung: entweder eine konfigurierte Raum-ID oder der Sentinel,
 // den der Sidecar durch seinen KKK_MATRIX_ROOM ersetzt.
 function clubRoom() { return validRoom(CLUB_ROOM_ENV) || '__club__'; }
+// Einen einzelnen Wert aus einer .env-Datei lesen. Spiegelt das Parsing des Sidecars:
+// Kommentar- (#, ;) und Leerzeilen ignorieren, optionales "export ", Anführungszeichen
+// und Inline-Kommentare (Leerraum + #) berücksichtigen. Fehler (Datei fehlt/keine Rechte)
+// führen zu leerem Ergebnis.
+function parseEnvValue(val) {
+  val = String(val).trim();
+  if (val[0] === "'" || val[0] === '"') { const q = val[0], end = val.indexOf(q, 1); return end !== -1 ? val.slice(1, end) : val.slice(1); }
+  // Inline-Kommentar nur bei Leerraum vor dem '#' abschneiden. Ein führendes '#' gehört
+  // zu einer Raum-Alias-Adresse (#alias:server) und ist kein Kommentar.
+  let out = '';
+  for (let i = 0; i < val.length; i++) { const ch = val[i]; if (ch === '#' && i > 0 && /\s/.test(val[i - 1])) break; out += ch; }
+  return out.trim();
+}
+function readEnvFileKey(file, key) {
+  if (!file) return '';
+  try {
+    const txt = fs.readFileSync(file, 'utf8');
+    for (const raw of txt.split(/\r?\n/)) {
+      let s = raw.trim();
+      if (!s || s[0] === '#' || s[0] === ';') continue;
+      if (s.startsWith('export ')) s = s.slice(7);
+      const eq = s.indexOf('='); if (eq < 0) continue;
+      if (s.slice(0, eq).trim() !== key) continue;
+      return parseEnvValue(s.slice(eq + 1));
+    }
+  } catch (_) {}
+  return '';
+}
+// Rohe Raum-Adresse aus den konfigurierten Quellen (siehe MATRIX_ENV_FILE oben).
+function matrixRoomRaw() {
+  return String(process.env.KKK_MATRIX_ROOM || readEnvFileKey(MATRIX_ENV_FILE, 'KKK_MATRIX_ROOM') || CLUB_ROOM_ENV || '').trim();
+}
+// Öffentlich anzeigbarer Vereinsraum für die Unterseite. Gibt die validierte Adresse
+// (#alias:server oder !id:server) samt matrix.to-Link zurück, oder null wenn nicht konfiguriert.
+function publicMatrixRoom() {
+  const addr = validRoom(matrixRoomRaw());
+  if (!addr) return null;
+  return { address: addr, url: 'https://matrix.to/#/' + addr };
+}
+// Vom Sidecar geschriebenen Nachrichten-Feed einlesen (chronologisch nach seq).
+// Beschädigte Zeilen werden übersprungen; fehlt die Datei, ist der Feed leer.
+function readFeed() {
+  let txt;
+  try { txt = fs.readFileSync(MATRIX_FEED_FILE, 'utf8'); } catch (_) { return []; }
+  const out = [];
+  for (const line of txt.split('\n')) {
+    const s = line.trim(); if (!s) continue;
+    let o; try { o = JSON.parse(s); } catch (_) { continue; }
+    if (o && typeof o.seq === 'number') out.push(o);
+  }
+  out.sort((a, b) => a.seq - b.seq);
+  return out;
+}
+function feedItem(o) {
+  return { seq: o.seq, name: String(o.name || o.sender || '?'), sender: String(o.sender || ''),
+    ts: Number(o.ts) || 0, type: String(o.type || 'm.text'), body: String(o.body || '') };
+}
 function announcePoll(p) {
   const link = pollLink();
   enqueueMatrix(clubRoom(), '🎳 KKk58 – Neue Abstimmung\n„' + p.question + '"\nLäuft bis ' + fmtDateMs(p.closesAt) + '. Bitte mit Ja oder Nein abstimmen.' + (link ? ('\n' + link) : ''));
@@ -1353,8 +1420,50 @@ function handle(req, res) {
     try { return send(res, 200, qr.qrSvg(data), { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'no-store' }); }
     catch (e) { return send(res, 400, { error: 'Daten zu lang für QR' }); }
   }
+  // Nachrichten des Vereinsraums (read-only). Paginierung über stabile seq-Cursor:
+  //   ?before=<seq>  -> die neuesten <limit> Nachrichten ÄLTER als seq (Endlos-Scroll nach oben)
+  //   ?after=<seq>   -> alle Nachrichten NEUER als seq (Live-Nachladen unten)
+  //   sonst          -> die neuesten <limit> Nachrichten
+  if (api === '/matrix/messages' && req.method === 'GET') {
+    const feed = readFeed();
+    const latestSeq = feed.length ? feed[feed.length - 1].seq : null;
+    let limit = parseInt(u.searchParams.get('limit'), 10); if (!(limit > 0)) limit = 30; if (limit > 100) limit = 100;
+    const beforeRaw = u.searchParams.get('before'), afterRaw = u.searchParams.get('after');
+    if (afterRaw !== null) {
+      const after = parseInt(afterRaw, 10);
+      let newer = Number.isFinite(after) ? feed.filter(x => x.seq > after) : feed;
+      if (newer.length > 300) newer = newer.slice(-300); // Schutz gegen sehr große Nachhol-Antworten
+      return send(res, 200, { messages: newer.map(feedItem), latestSeq });
+    }
+    const before = beforeRaw !== null ? parseInt(beforeRaw, 10) : null;
+    const subset = (before !== null && Number.isFinite(before)) ? feed.filter(x => x.seq < before) : feed;
+    const page = subset.slice(-limit);
+    return send(res, 200, {
+      messages: page.map(feedItem),
+      firstSeq: page.length ? page[0].seq : null,
+      hasMore: subset.length > page.length,
+      latestSeq,
+    });
+  }
+  // Relay: eine in der Webapp geschriebene Nachricht als Bot (KKK_MATRIX_USER) in den
+  // Vereinsraum senden – formatiert als „Person: Nachricht". „Person" ist der Stammname
+  // des Kontos; ist keiner zugeordnet, wird der Benutzername verwendet. Der eigentliche
+  // Versand läuft über den Sidecar (Outbox); die Nachricht taucht danach im Feed auf.
+  if (api === '/matrix/say' && req.method === 'POST') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
+    return readJson(req, body => {
+      if (!body) return send(res, 400, { error: 'ungültige Anfrage' });
+      let text = String(body.text != null ? body.text : '').replace(/\r\n/g, '\n').trim();
+      if (!text) return send(res, 422, { error: 'Leere Nachricht' });
+      if (text.length > MATRIX_SAY_MAX) text = text.slice(0, MATRIX_SAY_MAX);
+      if (mRateHit('say:' + me.id, 2000)) return send(res, 429, { error: 'Zu schnell – bitte kurz warten.' });
+      const who = personNameOf(me) || me.username;
+      const queued = enqueueMatrix(clubRoom(), who + ': ' + text);
+      return send(res, 200, { ok: true, queued });
+    });
+  }
   if (api === '/logout' && req.method === 'POST') { clearSessionCookie(res); return send(res, 200, { ok: true }); }
-  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, places: db.places, lastBahnen: db.lastBahnen, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView), me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
+  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, places: db.places, lastBahnen: db.lastBahnen, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView), matrixRoom: publicMatrixRoom(), me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
   if (api === '/roster' && req.method === 'GET') return send(res, 200, { roster: db.roster });
   if (api === '/archive' && req.method === 'GET') return send(res, 200, { archive: db.archive.map(archiveMeta).sort((a, b) => b.savedAt - a.savedAt) });
   if (api === '/export' && req.method === 'GET') {

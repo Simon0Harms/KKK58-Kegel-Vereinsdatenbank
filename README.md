@@ -69,6 +69,9 @@ cat /opt/kkk58/data/INITIAL-ADMIN.txt
 | `KKK_ADMIN_USER` / `KKK_ADMIN_PASS` | – | Nur beim allerersten Start relevant |
 | `KKK_PUBLIC_URL` | *(aus Request)* | Öffentliche Basis-URL für absolute **Matrix-Login-Links** (z. B. `https://nas.example.net/kkk58`). Ohne die Variable aus `X-Forwarded-*` abgeleitet. |
 | `KKK_OUTBOX_DIR` | `<DATA_DIR>/matrix-outbox` | Spool für Matrix-Login-Nachrichten (Codes/Login-Links); muss mit dem Sidecar übereinstimmen. |
+| `KKK_MATRIX_ENV_FILE` | `/opt/kkk58/matrix-backup/kkk58-matrix.env` | Env-Datei des Matrix-Sidecars, aus der die Node-App die Raum-Adresse für die Unterseite **Matrix-Raum** ausliest (Schlüssel `KKK_MATRIX_ROOM`). So muss der Raum nur beim Sidecar gepflegt werden. |
+| `KKK_MATRIX_ROOM` | *(sonst aus `KKK_MATRIX_ENV_FILE`, dann `KKK_CLUB_ROOM`)* | Adresse des Matrix-Vereinsraums (`#alias:server` oder `!id:server`), die auf der Unterseite **Matrix-Raum** samt Beitritts-Link und QR-Code angezeigt wird. Explizit gesetzt hat sie Vorrang vor der Env-Datei. Ohne gültigen Wert weist die Seite auf die fehlende Konfiguration hin. |
+| `KKK_FEED_FILE` | `<DATA_DIR>/matrix-feed.jsonl` | Vom Matrix-Sidecar geschriebener Nachrichten-Feed (JSONL), den die Node-App **nur liest**, um auf der Unterseite **Matrix-Raum** den Nachrichtenverlauf anzuzeigen. Muss mit dem `KKK_FEED_FILE` des Sidecars übereinstimmen. |
 
 **Wichtig – `BIND` (dieses Setup: NPMplus in separatem LXC):**
 - Die App-LXC und der NPM-LXC sind getrennt → `BIND=0.0.0.0` (Default in der
@@ -530,6 +533,37 @@ Abstimmung selbst funktioniert aber weiter. Enthält eine Nachricht einen Link z
 Speicherung als `polls`/`seqPolls` in `data/db.json` (Stimmen je `userId`); Änderungen laufen über
 die Live-Sync-Operationen `addPoll` / `votePoll` / `closePoll` / `removePoll` und erscheinen sofort
 bei allen angemeldeten Mitgliedern.
+
+## Matrix-Raum (Unterseite)
+
+Der Reiter **„Matrix-Raum"** zeigt die Adresse des Vereinsraums (Beitritts-Link + QR-Code) und
+darunter den **Verlauf** der Raumnachrichten. Man kann nach oben scrollen, um ältere Nachrichten
+nachzuladen; neue erscheinen automatisch (Abgleich alle ~20 s, solange der Reiter offen ist). Über
+das Eingabefeld unter dem Verlauf kann man **selbst schreiben**. Die Raum-Adresse stammt aus
+`KKK_MATRIX_ROOM` (siehe Env-Tabelle; wird bei Bedarf aus der Sidecar-Datei gelesen).
+
+**Relay-Versand (Schreiben aus der Webapp):** Eine im Eingabefeld geschriebene Nachricht stellt der
+Bot (`KKK_MATRIX_USER`) in den Raum, formatiert als **„Person: Nachricht"**. „Person" ist der dem
+Konto zugeordnete **Stammname** (`rosterId` → Verzeichnis); ist keiner zugeordnet, wird der
+**Benutzername** verwendet. Der Versand läuft – wie die Login-Links – über den **Sidecar** (Outbox),
+weshalb die eigene Nachricht mit **kurzer Verzögerung** (bis zu einem Sidecar-Poll, Standard ~15 s)
+im Verlauf und im Raum erscheint. Ohne laufenden Sidecar wird nichts gesendet. Ein einfacher
+Schutz begrenzt den Versand auf ~eine Nachricht alle 2 s je Konto und 2000 Zeichen je Nachricht.
+
+Wichtig zur Funktionsweise und zu den Grenzen:
+
+- Der Vereinsraum ist **Ende-zu-Ende-verschlüsselt**. Die Node-App hat **keine** Schlüssel und kann
+  den Inhalt nicht selbst lesen. Deshalb liefert der **Sidecar** (er ist im Raum und hat den
+  Krypto-Store) die entschlüsselten Textnachrichten über die Datei `KKK_FEED_FILE`; die Node-App
+  zeigt nur diese Datei an. **Ohne laufenden, aktuellen Sidecar bleibt der Verlauf leer.**
+- Angezeigt werden **Textnachrichten** (`m.text`, `m.notice`, `m.emote`). Bilder/Dateien und der
+  Nachrichten-**Inhalt** anderer Ereignistypen werden nicht dargestellt.
+- Der Verlauf beginnt **ab dem Zeitpunkt, ab dem der Sidecar mitliest**. Ältere Nachrichten von
+  davor liegen ihm i. d. R. nicht (bzw. ohne passende Schlüssel) vor und erscheinen nicht rückwirkend.
+- **Schreiben** aus der Webapp läuft als Relay über den Bot (siehe oben); alle so gesendeten
+  Nachrichten erscheinen im Raum unter dem Bot-Konto in der Form „Person: Nachricht". Eine echte
+  Absender-Identität je Mitglied gibt es dabei nicht – dafür müsste jedes Mitglied ein eigenes
+  Matrix-Konto nutzen.
 
 ## Kalender / Termine
 

@@ -27,7 +27,10 @@ import time
 from datetime import datetime
 
 try:
-    from nio import AsyncClient, AsyncClientConfig, LoginResponse, RoomSendResponse
+    from nio import (
+        AsyncClient, AsyncClientConfig, LoginResponse, RoomSendResponse,
+        RoomMessageText, RoomMessageNotice, RoomMessageEmote,
+    )
 except ImportError:
     sys.stderr.write(
         "Fehlt: matrix-nio mit E2EE. Bitte installieren:\n"
@@ -108,6 +111,12 @@ class Config:
         self.device_name = env("KKK_MATRIX_DEVICE_NAME", "KKk58-Backup")
         self.require_encryption = env("KKK_REQUIRE_ENCRYPTION", "1") != "0"
         self.max_lines = int(env("KKK_MAX_LOG_LINES", "40"))  # max. Zeilen pro Protokoll-Nachricht
+        # Nachrichten-Feed für die Webapp-Unterseite „Matrix-Raum": entschlüsselte
+        # Textnachrichten des Raums werden hier (chronologisch, eine JSON-Zeile je
+        # Nachricht) abgelegt. Die Node-App liest die Datei nur; muss mit deren
+        # KKK_FEED_FILE übereinstimmen. Standard: <db-Verzeichnis>/matrix-feed.jsonl
+        self.feed_file = env("KKK_FEED_FILE", os.path.join(os.path.dirname(self.db_file) or ".", "matrix-feed.jsonl"))
+        self.feed_max = int(env("KKK_FEED_MAX", "1000"))  # max. Nachrichten im Feed (älteste werden verworfen)
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +298,104 @@ class MatrixSync:
         self.last_backup = self.state.get("last_backup", 0)
         self._stop = False
         self._outbox_attempts = {}  # id -> Anzahl Fehlversuche (nur im Speicher)
+        # Dedup-Set der bereits protokollierten event_ids + nächste laufende Nummer.
+        self._feed_seen, self._feed_next = self._load_feed_state()
+
+    # ---- Nachrichten-Feed für die Webapp ----
+    def _load_feed_state(self):
+        """event_ids der vorhandenen Nachrichten (Dedup über Neustart) und die nächste
+        freie laufende Nummer (seq). seq ist stabil und bleibt beim Kürzen erhalten,
+        damit die Paginierung der Webapp nicht springt."""
+        seen = set()
+        max_seq = -1
+        try:
+            with open(self.cfg.feed_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except ValueError:
+                        continue
+                    eid = obj.get("id")
+                    if eid:
+                        seen.add(eid)
+                    s = obj.get("seq")
+                    if isinstance(s, int) and s > max_seq:
+                        max_seq = s
+        except OSError:
+            pass
+        return seen, max_seq + 1
+
+    def _feed_append(self, entry):
+        """Eine Nachricht ans Feed anhängen (atomar genug für einen Schreiber) und
+        die Datei gelegentlich auf feed_max kürzen."""
+        try:
+            os.makedirs(os.path.dirname(self.cfg.feed_file) or ".", exist_ok=True)
+            with open(self.cfg.feed_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError as e:
+            self.log("Feed-Schreibfehler:", repr(e))
+            return
+        self._feed_seen.add(entry["id"])
+        # Kürzen erst mit Reserve, damit nicht bei jeder Nachricht neu geschrieben wird.
+        if len(self._feed_seen) > int(self.cfg.feed_max * 1.2) + 5:
+            self._feed_trim()
+
+    def _feed_trim(self):
+        try:
+            with open(self.cfg.feed_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            if len(lines) <= self.cfg.feed_max:
+                return
+            keep = lines[-self.cfg.feed_max:]
+            tmp = self.cfg.feed_file + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.writelines(keep)
+            os.replace(tmp, self.cfg.feed_file)
+            # Dedup-Set neu aufbauen (nur noch die behaltenen ids)
+            self._feed_seen = set()
+            for ln in keep:
+                try:
+                    eid = json.loads(ln).get("id")
+                    if eid:
+                        self._feed_seen.add(eid)
+                except ValueError:
+                    pass
+        except OSError as e:
+            self.log("Feed-Kürzen fehlgeschlagen:", repr(e))
+
+    async def _on_room_message(self, room, event):
+        """Callback für Textnachrichten im Vereinsraum. nio liefert verschlüsselte
+        Ereignisse hier bereits entschlüsselt (sofern die Schlüssel vorliegen)."""
+        try:
+            if not self.room_id or getattr(room, "room_id", None) != self.room_id:
+                return
+            eid = getattr(event, "event_id", None)
+            if not eid or eid in self._feed_seen:
+                return
+            body = getattr(event, "body", None)
+            if not body:
+                return
+            sender = getattr(event, "sender", "") or ""
+            try:
+                name = room.user_name(sender) or sender
+            except Exception:
+                name = sender
+            entry = {
+                "seq": self._feed_next,
+                "id": eid,
+                "sender": sender,
+                "name": name,
+                "ts": int(getattr(event, "server_timestamp", 0) or 0),
+                "type": getattr(event, "msgtype", "m.text") or "m.text",
+                "body": str(body),
+            }
+            self._feed_next += 1
+            self._feed_append(entry)
+        except Exception as e:  # ein Callback-Fehler darf den Sync nicht abbrechen
+            self.log("Feed-Callback-Fehler (ignoriert):", repr(e))
 
     def log(self, *a):
         print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), *a, flush=True)
@@ -334,17 +441,26 @@ class MatrixSync:
             save_state(self.cfg.state_file, self.state)
             self.log("Angemeldet (neu) als", self.cfg.user_id, "device", resp.device_id)
 
-        # Ersten Sync ausführen: lädt Räume + Geräteschlüssel
-        await self.client.sync(timeout=30000, full_state=True)
-        if self.client.should_upload_keys:
-            await self.client.keys_upload()
-
-        # Raum-ID auflösen (Alias -> ID) und ggf. beitreten
+        # Raum-ID auflösen (Alias -> ID) – direkte API, vor dem ersten Sync möglich.
         room = self.cfg.room
         if room.startswith("#"):
             r = await self.client.room_resolve_alias(room)
             room = getattr(r, "room_id", None) or room
         self.room_id = room
+
+        # Feed-Callback VOR dem ersten Sync registrieren, damit die anfänglich vom
+        # Homeserver gelieferten Nachrichten des Raums bereits im Feed landen.
+        self.client.add_event_callback(
+            self._on_room_message,
+            (RoomMessageText, RoomMessageNotice, RoomMessageEmote),
+        )
+
+        # Ersten Sync ausführen: lädt Räume + Geräteschlüssel (und die Timeline -> Feed)
+        await self.client.sync(timeout=30000, full_state=True)
+        if self.client.should_upload_keys:
+            await self.client.keys_upload()
+
+        # Falls noch kein Mitglied: beitreten und erneut syncen
         if self.room_id not in self.client.rooms:
             await self.client.join(self.room_id)
             await self.client.sync(timeout=30000)
@@ -552,6 +668,11 @@ class MatrixSync:
             pass
         while not self._stop:
             await asyncio.sleep(self.cfg.poll_seconds)
+            # Kurzer Sync: liefert neue Raumnachrichten an den Feed-Callback.
+            try:
+                await self.client.sync(timeout=0)
+            except Exception as e:
+                self.log("Feed-Sync-Hinweis (fahre fort):", repr(e))
             # Sende-Aufträge (Codes/Login-Links) zeitnah abarbeiten
             await self.process_outbox()
             try:
