@@ -39,6 +39,25 @@ chmod 750 /opt/kkk58/data
 
 ### Als systemd-Dienst starten
 
+Die Unit `kkk58.service` trägt die Umgebungsvariablen **nicht mehr fest ein**,
+sondern lädt sie über `EnvironmentFile=-/opt/kkk58/kkk58.env`. Vor dem ersten Start die
+Vorlage kopieren und anpassen (Werte siehe Abschnitt 2):
+
+```bash
+cp /opt/kkk58/kkk58.env.example /opt/kkk58/kkk58.env
+chown kkk58:kkk58 /opt/kkk58/kkk58.env
+chmod 640 /opt/kkk58/kkk58.env
+$EDITOR /opt/kkk58/kkk58.env
+```
+
+> Das führende `-` in `EnvironmentFile=-/opt/kkk58/kkk58.env` macht die Datei optional:
+> fehlt sie, startet der Dienst trotzdem und die App nutzt ihre eingebauten
+> Defaults. In der Env-Datei nur `KEY=WERT` je Zeile verwenden – **keine
+> Inline-Kommentare** (`KEY=wert # …`), da systemd diese nicht zuverlässig
+> entfernt; Kommentare gehören in eigene Zeilen.
+
+Danach den Dienst einrichten:
+
 ```bash
 ln -s /opt/kkk58/kkk58.service /etc/systemd/system/ 
 systemctl daemon-reload
@@ -72,6 +91,10 @@ cat /opt/kkk58/data/INITIAL-ADMIN.txt
 | `KKK_MATRIX_ENV_FILE` | `/opt/kkk58/matrix-backup/kkk58-matrix.env` | Env-Datei des Matrix-Sidecars, aus der die Node-App die Raum-Adresse für die Unterseite **Matrix-Raum** ausliest (Schlüssel `KKK_MATRIX_ROOM`). So muss der Raum nur beim Sidecar gepflegt werden. |
 | `KKK_MATRIX_ROOM` | *(sonst aus `KKK_MATRIX_ENV_FILE`, dann `KKK_CLUB_ROOM`)* | Adresse des Matrix-Vereinsraums (`#alias:server` oder `!id:server`), die auf der Unterseite **Matrix-Raum** samt Beitritts-Link und QR-Code angezeigt wird. Explizit gesetzt hat sie Vorrang vor der Env-Datei. Ohne gültigen Wert weist die Seite auf die fehlende Konfiguration hin. |
 | `KKK_FEED_FILE` | `<DATA_DIR>/matrix-feed.jsonl` | Vom Matrix-Sidecar geschriebener Nachrichten-Feed (JSONL), den die Node-App **nur liest**, um auf der Unterseite **Matrix-Raum** den Nachrichtenverlauf anzuzeigen. Muss mit dem `KKK_FEED_FILE` des Sidecars übereinstimmen. |
+
+Diese Variablen werden in `/opt/kkk58/kkk58.env` gesetzt (Vorlage: `kkk58.env.example`),
+die von `kkk58.service` per `EnvironmentFile` geladen wird. Nach Änderungen an der
+Datei den Dienst neu starten: `sudo systemctl restart kkk58`.
 
 **Wichtig – `BIND` (dieses Setup: NPMplus in separatem LXC):**
 - Die App-LXC und der NPM-LXC sind getrennt → `BIND=0.0.0.0` (Default in der
@@ -519,7 +542,7 @@ Kegelfahrt?".
 Die Zustellung läuft – wie die Login-Links – über den **Matrix-Sidecar** (Datei-Spool
 `data/matrix-outbox`); ohne laufenden Sidecar werden keine Matrix-Nachrichten verschickt, die
 Abstimmung selbst funktioniert aber weiter. Enthält eine Nachricht einen Link zur App, muss dafür
-`KKK_PUBLIC_URL` in der Node-Unit gesetzt sein (sonst wird der Link weggelassen).
+`KKK_PUBLIC_URL` in `/opt/kkk58/kkk58.env` gesetzt sein (sonst wird der Link weggelassen).
 
 **Zielraum konfigurieren** – zwei Wege:
 
@@ -527,7 +550,7 @@ Abstimmung selbst funktioniert aber weiter. Enthält eine Nachricht einen Link z
    Sidecar ersetzt ihn beim Senden durch seinen `KKK_MATRIX_ROOM`. Kein zusätzlicher Wert in der
    Node-Unit nötig – es genügt ein aktueller Sidecar (`kkk58_matrix_sync.py`).
 2. **Raum in der Node-App setzen:** Alternativ `KKK_CLUB_ROOM=!raumId:server` (oder
-   `#alias:server`) in der Node-Unit `kkk58.service` setzen; dann adressiert die App den Raum
+   `#alias:server`) in `/opt/kkk58/kkk58.env` setzen; dann adressiert die App den Raum
    direkt (funktioniert auch mit einem älteren Sidecar).
 
 Speicherung als `polls`/`seqPolls` in `data/db.json` (Stimmen je `userId`); Änderungen laufen über

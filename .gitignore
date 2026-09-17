@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 data/
 data-test/
+
+# Lokale Konfiguration mit Geheimnissen (nie committen).
+# Vorlagen (*.env.example) bleiben absichtlich versioniert.
+*.env

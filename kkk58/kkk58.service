@@ -13,25 +13,17 @@ Restart=on-failure
 RestartSec=3
 
 # --- Konfiguration ---
-Environment=PORT=3000
-# NPMplus laeuft in einem SEPARATEN LXC -> App muss von aussen erreichbar sein.
-# 0.0.0.0 = alle Interfaces (einfach, funktioniert). Alternativ die konkrete
-# IP dieser App-LXC eintragen. Zugriff auf Port 3000 per Firewall auf den
-# NPM-LXC beschraenken (siehe README, Abschnitt 3).
-Environment=BIND=0.0.0.0
-Environment=BASE_PATH=/kkk58
-Environment=DATA_DIR=/opt/kkk58/data
-Environment=COOKIE_SECURE=true
-# Öffentliche Basis-URL – nötig für absolute Login-Links beim Matrix-Login.
-# Ohne diese Variable wird die URL aus den X-Forwarded-*-Headern von NPMplus abgeleitet.
-Environment=KKK_PUBLIC_URL=https://nas.example.net/kkk58
-# Spool-Verzeichnis für Matrix-Login-Nachrichten (muss mit dem Sidecar übereinstimmen).
-# Standard: <DATA_DIR>/matrix-outbox – liegt bereits unter ReadWritePaths.
-# Environment=KKK_OUTBOX_DIR=/opt/kkk58/data/matrix-outbox
-# Optional beim allerersten Start (sonst wird ein Zufallspasswort erzeugt
-# und in /opt/kkk58/data/INITIAL-ADMIN.txt geschrieben):
-# Environment=KKK_ADMIN_USER=admin
-# Environment=KKK_ADMIN_PASS=BitteAendern
+# Alle Umgebungsvariablen werden aus einer eigenen Datei geladen, statt sie hier
+# fest einzutragen. Vorlage: kkk58.env.example -> nach kkk58.env (im
+# Anwendungsverzeichnis /opt/kkk58) kopieren
+# und die Werte anpassen. Das fuehrende "-" macht die Datei optional: fehlt sie,
+# startet der Dienst trotzdem und die App nutzt ihre eingebauten Defaults.
+#
+# WICHTIG: systemd wertet in EnvironmentFile nur ganze Kommentarzeilen (# am
+# Zeilenanfang) aus. Inline-Kommentare hinter einem Wert (KEY=wert # ...) werden
+# NICHT verlaesslich entfernt und wuerden Teil des Wertes -> in der Env-Datei
+# keine Inline-Kommentare verwenden.
+EnvironmentFile=-/opt/kkk58/kkk58.env
 
 # --- Haertung ---
 NoNewPrivileges=true

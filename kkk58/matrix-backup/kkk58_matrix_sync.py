@@ -748,7 +748,7 @@ async def _amain():
 def main():
     # env-Datei laden, falls vorhanden (Pfad via KKK_ENV_FILE, sonst Standard).
     # So funktioniert auch ein direkter Start ohne systemd/EnvironmentFile.
-    load_env_file(os.environ.get("KKK_ENV_FILE", "/etc/kkk58-matrix.env"))
+    load_env_file(os.environ.get("KKK_ENV_FILE", "/opt/kkk58/matrix-backup/kkk58-matrix.env"))
     try:
         asyncio.run(_amain())
     except KeyboardInterrupt:

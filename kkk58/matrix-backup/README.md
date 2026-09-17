@@ -32,7 +32,6 @@ pip install "matrix-nio[e2e]" --break-system-packages
    cp /opt/kkk58/matrix-backup/env.example /opt/kkk58/matrix-backup/kkk58-matrix.env
    nano /opt/kkk58/matrix-backup/kkk58-matrix.env      # Homeserver, Bot-User, Raum, Passwort, Pfade
    chmod 600 /opt/kkk58/matrix-backup/kkk58-matrix.env
-   ln -s /opt/kkk58/matrix-backup/kkk58-matrix.env /etc/kkk58-matrix.env
    ```
 4. **Erststart** (meldet sich mit Passwort an, speichert danach ein Access-Token und
    eine stabile Geräte-ID im Store):
