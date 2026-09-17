@@ -2191,15 +2191,9 @@
       if(!matrixRoom||!matrixRoom.address){
         box.innerHTML='<p class="mxintro">Es ist kein Matrix-Vereinsraum konfiguriert. Ein Administrator kann ihn über die Sidecar-Datei (<span class="mxroom">KKK_MATRIX_ROOM</span>) festlegen.</p>';
       } else {
-        const addr=matrixRoom.address, url=matrixRoom.url||('https://matrix.to/#/'+addr);
         box.innerHTML=
-          '<p class="mxintro">Raum-Adresse:</p>'+
-          '<p class="mxroom" style="font-size:1rem">'+esc(addr)+'</p>'+
-          '<p style="margin:12px 0"><a class="btn prim" href="'+esc(url)+'" target="_blank" rel="noopener">Raum in Matrix öffnen</a> '+
-          '<button class="btn sm" type="button" id="mxCopy">Adresse kopieren</button></p>'+
-          '<div class="qrbox" style="max-width:240px"><img alt="QR-Code zum Beitreten" src="'+BASE+'/api/qr?data='+encodeURIComponent(url)+'"><p class="mxhint" style="text-align:center">QR-Code scannen, um dem Raum beizutreten</p></div>';
-        const cp=$("mxCopy");
-        if(cp) cp.addEventListener("click",()=>{ try{ navigator.clipboard.writeText(addr); cp.textContent="Kopiert ✓"; setTimeout(()=>{cp.textContent="Adresse kopieren";},1500); }catch(_){}});
+          '<p class="mxintro">Du brauchst eine Matrix-App, um dem Vereinsraum beizutreten. Element bekommst du hier: <a href="https://element.io/de/download" target="_blank" rel="noopener">element.io/de/download</a>.</p>'+
+          '<p class="mxhint">Trage im <b>Verzeichnis</b> bei deinem Eintrag deine Matrix-ID (MXID) ein – dann wirst du automatisch in den Vereinsraum eingeladen.</p>';
       }
     }
     mxBootFeed();
