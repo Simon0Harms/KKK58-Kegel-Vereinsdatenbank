@@ -106,12 +106,15 @@ const LOG_MAX = 400;
 // im Archiv wird zusätzlich der Name als Snapshot mitgespeichert, damit spätere
 // Umbenennungen/Löschungen die historische Statistik nicht verändern.
 const PLACE_NAME_MAX = 80;
+const PLACE_ADDRESS_MAX = 200;
+function normPlaceAddress(v) { return String(v == null ? '' : v).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().slice(0, PLACE_ADDRESS_MAX); }
 function normPlace(src) {
   const lb = (src && Array.isArray(src.lastBahnen)) ? normBahnen(src.lastBahnen) : null;
   return {
     id: (src && src.id != null) ? Number(src.id) : null,
     name: String((src && src.name) || '').trim().slice(0, PLACE_NAME_MAX),
     active: !(src && src.active === false),
+    address: normPlaceAddress(src && src.address), // optionale Anschrift des Kegelorts (Freitext), '' = keine
     lastBahnen: lb // zuletzt an diesem Ort gespielte Bahn-Konstellation (Vorschlag), null = keine Historie
   };
 }
@@ -289,14 +292,25 @@ const EVENT_REPEATS = ['none', 'weekly', 'biweekly', 'monthly', 'yearly'];
 function normEventRepeat(v) { return EVENT_REPEATS.indexOf(v) !== -1 ? v : 'none'; }
 function normEvent(src) {
   const repeat = normEventRepeat(src && src.repeat);
+  const pid = (src && src.placeId != null && src.placeId !== '') ? Number(src.placeId) : null;
   return {
     id: (src && src.id != null) ? Number(src.id) : null,
     date: normDate(src && src.date),
     text: String((src && src.text) || '').trim().slice(0, EVENT_TEXT_MAX),
     place: String((src && src.place) || '').trim().slice(0, EVENT_PLACE_MAX),
+    // Optionale Verknüpfung zu einem Kegelort (db.places): placeId als Referenz,
+    // placeName als Snapshot des Namens (bleibt lesbar, falls der Ort später gelöscht wird).
+    placeId: (pid != null && isFinite(pid)) ? pid : null,
+    placeName: String((src && src.placeName) || '').trim().slice(0, PLACE_NAME_MAX),
     repeat,
     until: repeat === 'none' ? null : normDate(src && src.until)
   };
+}
+// Verknüpften Kegelort prüfen und Namens-Snapshot aktualisieren; unbekannte Referenz wird verworfen.
+function resolveEventPlace(e) {
+  if (e.placeId != null) { const pl = placeById(e.placeId); if (pl) e.placeName = pl.name; else { e.placeId = null; e.placeName = ''; } }
+  else e.placeName = '';
+  return e;
 }
 function loadDb() {
   try {
@@ -607,6 +621,7 @@ function describeOp(op, ctx) {
     case 'setPlace': return 'Kegelort ' + (op.value == null ? 'entfernt' : ('gesetzt: ' + (placeNameById(op.value) || '#' + op.value)));
     case 'addPlace': return 'Kegelort angelegt: ' + (op.place ? op.place.name : '');
     case 'renamePlace': return 'Kegelort umbenannt in ' + op.name;
+    case 'setPlaceAddress': return 'Adresse des Kegelorts ' + (op.address ? 'gesetzt' : 'entfernt');
     case 'setPlaceActive': return 'Kegelort ' + (op.active ? 'aktiviert' : 'deaktiviert');
     case 'removePlace': return 'Kegelort gelöscht';
     case 'setNote': return (op.field === 'pumpen' ? 'Pumpenkegel-Notiz' : 'Bemerkung') + ' geändert';
@@ -1137,7 +1152,7 @@ function applyOp(op, user) {
     case 'addPlace': {
       const nm = String(op.name || '').trim(); if (!nm) return null;
       if (db.places.some(p => p.name.toLowerCase() === nm.toLowerCase())) return null;
-      const place = { id: ++db.seqPlaces, name: nm.slice(0, PLACE_NAME_MAX), active: true };
+      const place = { id: ++db.seqPlaces, name: nm.slice(0, PLACE_NAME_MAX), active: true, address: normPlaceAddress(op.address), lastBahnen: null };
       db.places.push(place);
       return { type: 'addPlace', place };
     }
@@ -1148,6 +1163,12 @@ function applyOp(op, user) {
       if (db.places.some(x => x.id !== p.id && x.name.toLowerCase() === nm.toLowerCase())) return null;
       p.name = nm.slice(0, PLACE_NAME_MAX);
       return { type: 'renamePlace', id: p.id, name: p.name };
+    }
+    case 'setPlaceAddress': {
+      if (!canManage(user.role)) return null;
+      const p = placeById(op.id); if (!p) return null;
+      p.address = normPlaceAddress(op.address);
+      return { type: 'setPlaceAddress', id: p.id, address: p.address };
     }
     case 'setPlaceActive': {
       if (!canManage(user.role)) return null;
@@ -1207,6 +1228,7 @@ function applyOp(op, user) {
     case 'addEvent': {
       if (!canManage(user.role)) return null;
       const e = normEvent(op.event || {}); if (!e.date || !e.text) return null;
+      resolveEventPlace(e);
       e.id = ++db.seqEvents; db.events.push(e);
       return { type: 'addEvent', event: e };
     }
@@ -1214,7 +1236,8 @@ function applyOp(op, user) {
       if (!canManage(user.role)) return null;
       const cur = db.events.find(x => x.id === Number(op.id)); if (!cur) return null;
       const e = normEvent(Object.assign({}, op.event, { id: cur.id })); if (!e.date || !e.text) return null;
-      cur.date = e.date; cur.text = e.text; cur.place = e.place; cur.repeat = e.repeat; cur.until = e.until;
+      resolveEventPlace(e);
+      cur.date = e.date; cur.text = e.text; cur.place = e.place; cur.placeId = e.placeId; cur.placeName = e.placeName; cur.repeat = e.repeat; cur.until = e.until;
       return { type: 'updateEvent', id: cur.id, event: cur };
     }
     case 'removeEvent': {

@@ -115,6 +115,11 @@
   #f_place option{color:#14202b;background:#fff}
   #f_place.needsel{border-color:#c0392b;box-shadow:0 0 0 2px rgba(192,57,43,.18)}
   .placetag{font-weight:400;font-size:.85em;color:var(--muted);white-space:nowrap}
+  .placesuggest{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0 0 10px;padding:8px 12px;border:1px solid #cfe3d9;background:#eef7f2;border-radius:10px;font-size:.9rem;color:#14202b}
+  .placesuggest .pstxt{flex:1 1 auto;min-width:160px}
+  .placesuggest .pstxt b{white-space:normal}
+  .placesuggest .psaddr{display:block;color:var(--muted);font-size:.85em;margin-top:1px}
+  .placesuggest button{flex:0 0 auto}
   .who{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:.85rem}
   .who .dot{width:8px;height:8px;border-radius:50%;background:#8fd6bf}
   .who .dot.off{background:#e0b0b0}
@@ -587,6 +592,7 @@
 
   <!-- ===== ANSCHREIBEN ===== -->
   <section id="view_sheet">
+    <div id="placeSuggest" class="placesuggest hidden"></div>
     <div class="controls">
       <div class="lanepick" id="lanepick">
         <span class="sortlbl">Bahnen:</span>
@@ -851,9 +857,12 @@
   <div class="login dirdlg">
     <div class="eyebrow">Kegelorte</div>
     <h1>Kegelorte verwalten</h1>
-    <div class="ddrow" style="margin:0 0 10px">
+    <div class="ddrow" style="margin:0 0 6px">
       <input id="pl_new" type="text" placeholder="Neuer Kegelort, z. B. Kegelbahn Musterhausen" autocapitalize="words" maxlength="80" style="flex:1">
       <button class="btn prim" id="pl_add" type="button">＋ Anlegen</button>
+    </div>
+    <div class="ddrow" style="margin:0 0 10px">
+      <input id="pl_newaddr" type="text" placeholder="Adresse (optional), z. B. Musterstr. 1, 12345 Musterhausen" autocapitalize="words" maxlength="200" style="flex:1">
     </div>
     <div class="dderr err" id="pl_err"></div>
     <div id="placeList"></div>
@@ -925,7 +934,8 @@
         </select>
       </div>
       <div class="fld dirfull"><label>Beschreibung</label><input id="ca_text" type="text" maxlength="200" placeholder="z. B. Kegelabend, Jahreshauptversammlung …"></div>
-      <div class="fld dirfull"><label>Ort (optional)</label><input id="ca_place" type="text" maxlength="120" placeholder="z. B. Kegelbahn LTSV, Vereinsheim …"></div>
+      <div class="fld dirfull"><label>Kegelort (optional)</label><select id="ca_placeid"></select></div>
+      <div class="fld dirfull"><label>Anderer Ort (optional)</label><input id="ca_place" type="text" maxlength="120" placeholder="z. B. Vereinsheim, Restaurant … (falls kein Kegelort)"></div>
       <div class="fld dirfull" id="ca_untilwrap" style="display:none"><label>Wiederholen bis (optional)</label><input id="ca_until" type="date"></div>
     </div>
     <div class="dderr err" id="ca_err"></div>
@@ -1272,7 +1282,8 @@
       case 'setMeta': state[op.field]=op.value; setInput('meta:'+op.field,op.value); break;
       case 'setPlace': state.placeId=(op.value!=null?op.value:null); renderPlaceSelect(); return;
       case 'addPlace': if(op.place && !places.some(p=>p.id===op.place.id)) places.push(op.place); renderPlaceSelect(); renderPlaceList(); return;
-      case 'renamePlace': { const p=places.find(x=>x.id===op.id); if(p)p.name=op.name; renderPlaceSelect(); renderPlaceList(); return; }
+      case 'renamePlace': { const p=places.find(x=>x.id===op.id); if(p)p.name=op.name; renderPlaceSelect(); renderPlaceList(); renderCal(); return; }
+      case 'setPlaceAddress': { const p=places.find(x=>x.id===op.id); if(p)p.address=op.address; renderPlaceList(); renderPlaceSuggest(); return; }
       case 'setPlaceActive': { const p=places.find(x=>x.id===op.id); if(p)p.active=op.active; if(!op.active && state.placeId===op.id) state.placeId=null; renderPlaceSelect(); renderPlaceList(); return; }
       case 'removePlace': places=places.filter(x=>x.id!==op.id); if(state.placeId===op.id) state.placeId=null; renderPlaceSelect(); renderPlaceList(); return;
       case 'setNote': state[op.field]=op.value; setInput('note:'+op.field,op.value); break;
@@ -1304,9 +1315,9 @@
       case 'addDevelop': if(op.entry && !develop.some(d=>d.id===op.entry.id)) develop.push(op.entry); renderDevelop(); return;
       case 'updateDevelop': { const i=develop.findIndex(d=>d.id===op.id); if(i>=0 && op.entry) develop[i]=op.entry; renderDevelop(); return; }
       case 'removeDevelop': develop=develop.filter(d=>d.id!==op.id); renderDevelop(); return;
-      case 'addEvent': if(op.event && !events.some(e=>e.id===op.event.id)) events.push(op.event); renderCal(); return;
-      case 'updateEvent': { const i=events.findIndex(e=>e.id===op.id); if(i>=0 && op.event) events[i]=op.event; renderCal(); return; }
-      case 'removeEvent': events=events.filter(e=>e.id!==op.id); renderCal(); return;
+      case 'addEvent': if(op.event && !events.some(e=>e.id===op.event.id)) events.push(op.event); renderCal(); renderPlaceSuggest(); return;
+      case 'updateEvent': { const i=events.findIndex(e=>e.id===op.id); if(i>=0 && op.event) events[i]=op.event; renderCal(); renderPlaceSuggest(); return; }
+      case 'removeEvent': events=events.filter(e=>e.id!==op.id); renderCal(); renderPlaceSuggest(); return;
       case 'addPoll': case 'votePoll': case 'closePoll': { if(op.poll){ const i=polls.findIndex(p=>p.id===op.poll.id); if(i>=0)polls[i]=op.poll; else polls.push(op.poll); } renderPolls(); return; }
       case 'removePoll': polls=polls.filter(p=>p.id!==op.id); renderPolls(); return;
     }
@@ -1811,6 +1822,25 @@
     if(!active.length && !curPlace) opts='<option value="">— noch kein Ort angelegt —</option>';
     sel.innerHTML=opts; sel.value=String(cur);
     sel.classList.toggle("needsel", cur==="");
+    renderPlaceSuggest();
+  }
+  // Hinweis in der Anschreibliste, wenn heute ein Termin mit hinterlegtem Kegelort läuft
+  // und dieser Ort noch nicht gesetzt ist: bietet einen Button „Ort übernehmen" (nie automatisch).
+  function renderPlaceSuggest(){
+    const box=$("placeSuggest"); if(!box)return;
+    const hide=()=>{ box.classList.add("hidden"); box.innerHTML=""; };
+    if(!state||!me){ hide(); return; }
+    const todayY=toYMD(calToday());
+    const occ=calOccurrences().find(o=>o.kind==="event"&&o.date===todayY&&o.placeId!=null&&places.some(p=>p.id===o.placeId));
+    if(!occ||state.placeId===occ.placeId){ hide(); return; }
+    const pl=places.find(p=>p.id===occ.placeId); if(!pl){ hide(); return; }
+    const addr=pl.address?'<span class="psaddr">📍 '+esc(pl.address)+'</span>':'';
+    box.innerHTML='<span class="pstxt">Heute: <b>'+esc(occ.text)+'</b> — vorgeschlagener Kegelort: <b>'+esc(pl.name)+'</b>'+addr+'</span>'
+      +'<button class="btn prim sm" type="button" id="ps_apply">Ort übernehmen</button>';
+    box.classList.remove("hidden");
+    const btn=$("ps_apply"); if(btn) btn.addEventListener("click",()=>{
+      state.placeId=occ.placeId; opValue({type:'setPlace',value:occ.placeId});
+      renderPlaceSelect(); maybeSuggestBahnen(occ.placeId); toast('Kegelort übernommen: '+pl.name+'.'); });
   }
   $("f_place").addEventListener("change",e=>{ const v=e.target.value; const pid=v===""?null:Number(v); state.placeId=pid; opValue({type:'setPlace',value:pid}); renderPlaceSelect(); maybeSuggestBahnen(pid); });
   // Konstellation vom letzten Mal vorschlagen: nur wenn noch keine Punkte eingetragen sind (nicht-destruktiv).
@@ -1830,8 +1860,10 @@
   function renderPlaceList(){ const box=$("placeList"); if(!box)return; const manage=!!(me&&effManage());
     if(!places.length){ box.innerHTML='<div class="prizeempty">Noch keine Kegelorte angelegt.</div>'; return; }
     const rows=placesSorted().map(p=>'<tr>'
-      +'<td class="l">'+esc(p.name)+(p.active?'':' <span class="badge">inaktiv</span>')+'</td>'
+      +'<td class="l">'+esc(p.name)+(p.active?'':' <span class="badge">inaktiv</span>')
+        +(p.address?'<div class="calplace" style="margin-top:2px">📍 '+esc(p.address)+'</div>':'')+'</td>'
       +(manage?('<td class="tactions"><button class="btn sm" type="button" data-pedit="'+p.id+'">Umbenennen</button> '
+        +'<button class="btn sm" type="button" data-paddr="'+p.id+'">Adresse</button> '
         +'<button class="btn sm" type="button" data-ptog="'+p.id+'">'+(p.active?'Deaktivieren':'Aktivieren')+'</button> '
         +'<button class="btn warn sm" type="button" data-pdel="'+p.id+'">Löschen</button></td>'):'<td></td>')
       +'</tr>').join("");
@@ -1839,6 +1871,9 @@
     box.querySelectorAll('[data-pedit]').forEach(b=>b.addEventListener("click",()=>{ const p=places.find(x=>x.id===Number(b.dataset.pedit)); if(!p)return;
       const nm=prompt("Neuer Name für den Kegelort:",p.name); if(nm==null)return; const t=nm.trim(); if(!t){toast("Name darf nicht leer sein.");return;}
       opStruct({type:'renamePlace',id:p.id,name:t}); }));
+    box.querySelectorAll('[data-paddr]').forEach(b=>b.addEventListener("click",()=>{ const p=places.find(x=>x.id===Number(b.dataset.paddr)); if(!p)return;
+      const ad=prompt('Adresse für „'+p.name+'“ (leer lassen zum Entfernen):',p.address||""); if(ad==null)return;
+      opStruct({type:'setPlaceAddress',id:p.id,address:ad.trim()}); }));
     box.querySelectorAll('[data-ptog]').forEach(b=>b.addEventListener("click",()=>{ const p=places.find(x=>x.id===Number(b.dataset.ptog)); if(!p)return;
       opStruct({type:'setPlaceActive',id:p.id,active:!p.active}); }));
     box.querySelectorAll('[data-pdel]').forEach(b=>b.addEventListener("click",()=>{ const p=places.find(x=>x.id===Number(b.dataset.pdel)); if(!p)return;
@@ -1849,10 +1884,10 @@
     $("placeFoot").classList.toggle("hidden",false);
     renderPlaceList(); $("placedlg").classList.remove("hidden"); setTimeout(()=>$("pl_new").focus(),50); }
   function closePlaceManage(){ $("placedlg").classList.add("hidden"); }
-  function addPlaceFromDlg(){ const t=($("pl_new").value||"").trim(); $("pl_err").textContent="";
+  function addPlaceFromDlg(){ const t=($("pl_new").value||"").trim(); const ad=($("pl_newaddr").value||"").trim(); $("pl_err").textContent="";
     if(!t){ $("pl_err").textContent="Bitte einen Namen eingeben."; return; }
     if(places.some(p=>p.name.toLowerCase()===t.toLowerCase())){ $("pl_err").textContent="Diesen Kegelort gibt es bereits."; return; }
-    opStruct({type:'addPlace',name:t}); $("pl_new").value=""; $("pl_new").focus(); }
+    opStruct({type:'addPlace',name:t,address:ad}); $("pl_new").value=""; $("pl_newaddr").value=""; $("pl_new").focus(); }
   $("f_place_manage").addEventListener("click",openPlaceManage);
   $("pl_add").addEventListener("click",addPlaceFromDlg);
   $("pl_new").addEventListener("keydown",e=>{ if(e.key==="Enter"){e.preventDefault();addPlaceFromDlg();} });
@@ -1930,14 +1965,15 @@
     events.forEach(ev=>{
       const start=parseYMD(ev.date); if(!start)return;
       const until=(ev.repeat!=="none"&&ev.until)?parseYMD(ev.until):null;
+      const plbl=evPlaceLabel(ev), pid=(ev.placeId!=null?ev.placeId:null);
       if(ev.repeat==="none"){
-        if(start>=today && start<=horizon) out.push({date:toYMD(start),d:new Date(start),text:ev.text,place:ev.place||"",kind:"event",repeat:"none",eid:ev.id});
+        if(start>=today && start<=horizon) out.push({date:toYMD(start),d:new Date(start),text:ev.text,place:plbl,placeId:pid,kind:"event",repeat:"none",eid:ev.id});
         return;
       }
       let cur=new Date(start), guard=0;
       while(cur<today && guard<6000){ const nx=stepRepeat(cur,ev.repeat); if(!nx)break; cur=nx; guard++; }
       while(cur<=horizon && (!until||cur<=until) && guard<6000){
-        out.push({date:toYMD(cur),d:new Date(cur),text:ev.text,place:ev.place||"",kind:"event",repeat:ev.repeat,eid:ev.id});
+        out.push({date:toYMD(cur),d:new Date(cur),text:ev.text,place:plbl,placeId:pid,kind:"event",repeat:ev.repeat,eid:ev.id});
         const nx=stepRepeat(cur,ev.repeat); if(!nx)break; cur=nx; guard++;
       }
     });
@@ -1983,7 +2019,7 @@
     const list=events.slice().sort((a,b)=> a.date<b.date?-1:a.date>b.date?1:0);
     const rows=list.map(e=>'<tr>'
       +'<td class="ddate" style="white-space:nowrap">'+esc(fmtLeft(e.date))+'</td>'
-      +'<td class="dtext">'+esc(e.text)+(e.place?' <span class="calplace">📍 '+esc(e.place)+'</span>':'')+'</td>'
+      +'<td class="dtext">'+esc(e.text)+((evPlaceLabel(e))?' <span class="calplace">📍 '+esc(evPlaceLabel(e))+'</span>':'')+'</td>'
       +'<td class="dcount">'+(e.repeat==="none"?'<span class="muted2">einmalig</span>':esc(REPEAT_LABEL[e.repeat])+(e.until?' bis '+esc(fmtLeft(e.until)):''))+'</td>'
       +'<td class="tactions"><button class="btn ghost sm" type="button" title="'+(e.repeat!=="none"?"Komplette Terminreihe als iCal (.ics) herunterladen":"Als iCal (.ics) herunterladen")+'" data-caical="'+e.id+'">⬇ iCal'+(e.repeat!=="none"?" (Reihe)":"")+'</button> <button class="btn sm" type="button" data-caedit="'+e.id+'">Bearbeiten</button> <button class="btn warn sm" type="button" data-cadel="'+e.id+'">Löschen</button></td>'
       +'</tr>').join("");
@@ -1993,10 +2029,24 @@
     box.querySelectorAll('[data-cadel]').forEach(b=>b.addEventListener("click",e=>{e.preventDefault(); const ev=events.find(x=>x.id===Number(b.dataset.cadel));
       if(confirm('Termin „'+(ev?((ev.date?fmtLeft(ev.date)+' – ':'')+(ev.text||'')).slice(0,60):'')+'" wirklich löschen?')) opStruct({type:'removeEvent',id:Number(b.dataset.cadel)}); }));
   }
+  // Verknüpften Kegelort eines Termins auflösen (Live-Objekt aus places, falls noch vorhanden)
+  function evPlace(ev){ if(ev&&ev.placeId!=null){ const p=places.find(x=>x.id===ev.placeId); if(p)return p; } return null; }
+  // Anzuzeigender Ort-Name: bevorzugt der verknüpfte Kegelort (bzw. sein Snapshot-Name), sonst der Freitext.
+  function evPlaceName(ev){ const p=evPlace(ev); if(p)return p.name; if(ev&&ev.placeId!=null&&ev.placeName)return ev.placeName+" (gelöscht)"; return ""; }
+  function evPlaceLabel(ev){ const linked=evPlaceName(ev), free=(ev&&ev.place)||""; if(linked&&free)return linked+" · "+free; return linked||free; }
+  // Adresse des verknüpften Kegelorts (für iCal/Hinweis), '' falls keiner oder ohne Adresse
+  function evPlaceAddress(ev){ const p=evPlace(ev); return (p&&p.address)?p.address:""; }
+  function fillPlaceSelect(sel,cur){ const active=places.filter(p=>p.active);
+    const curP=(cur!=null&&!active.some(p=>p.id===cur))?places.find(p=>p.id===cur):null;
+    let opts='<option value="">— kein Kegelort —</option>';
+    active.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(p=>{ opts+='<option value="'+p.id+'">'+esc(p.name)+'</option>'; });
+    if(curP) opts+='<option value="'+curP.id+'">'+esc(curP.name)+' (inaktiv)</option>';
+    sel.innerHTML=opts; sel.value=(cur!=null?String(cur):""); }
   function openCalEdit(id){ if(!(me&&effManage()))return; const ev=id!=null?events.find(x=>x.id===id):null; calEditId=id!=null?id:null;
     $("ca_title").textContent=ev?"Termin bearbeiten":"Neuer Termin"; $("ca_err").textContent="";
     $("ca_date").value=ev?(ev.date||""):toYMD(calToday());
     $("ca_text").value=ev?(ev.text||""):"";
+    fillPlaceSelect($("ca_placeid"), ev&&ev.placeId!=null?ev.placeId:null);
     $("ca_place").value=ev?(ev.place||""):"";
     $("ca_repeat").value=ev?(ev.repeat||"none"):"none";
     $("ca_until").value=(ev&&ev.until)?ev.until:"";
@@ -2009,10 +2059,11 @@
     const date=$("ca_date").value; if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ $("ca_err").textContent="Bitte ein gültiges Datum wählen."; return; }
     const text=$("ca_text").value.trim(); if(!text){ $("ca_err").textContent="Bitte eine Beschreibung eingeben."; return; }
     const place=$("ca_place").value.trim();
+    const pv=$("ca_placeid").value; const placeId=pv===""?null:Number(pv);
     const repeat=$("ca_repeat").value; const untilRaw=$("ca_until").value; let until=null;
     if(repeat!=="none" && untilRaw){ if(!/^\d{4}-\d{2}-\d{2}$/.test(untilRaw)){ $("ca_err").textContent="Enddatum ungültig."; return; }
       if(untilRaw<date){ $("ca_err").textContent="Das Enddatum darf nicht vor dem Startdatum liegen."; return; } until=untilRaw; }
-    const event={ date, text, place, repeat, until };
+    const event={ date, text, place, placeId, repeat, until };
     if(calEditId!=null) opStruct({type:'updateEvent',id:calEditId,event});
     else opStruct({type:'addEvent',event});
     closeCalEdit(); toast("Gespeichert.");
@@ -2040,7 +2091,9 @@
     v+="DTSTART;VALUE=DATE:"+icsDate(ev.date)+"\r\n";
     v+="DTEND;VALUE=DATE:"+icsAddDay(ev.date)+"\r\n";
     v+="SUMMARY:"+icsEsc(ev.text)+"\r\n";
-    if(ev.place)v+="LOCATION:"+icsEsc(ev.place)+"\r\n";
+    const _lp=evPlace(ev); const _pn=_lp?_lp.name:((ev.placeId!=null&&ev.placeName)?ev.placeName:"");
+    const loc=[_pn,evPlaceAddress(ev),ev.place].filter(Boolean).join(", ");
+    if(loc)v+="LOCATION:"+icsEsc(loc)+"\r\n";
     const rr=icsRRule(ev); if(rr)v+=rr+"\r\n";
     return v+"END:VEVENT\r\n";
   }
