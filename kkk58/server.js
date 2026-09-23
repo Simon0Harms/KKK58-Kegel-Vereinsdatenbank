@@ -774,6 +774,10 @@ function archiveMeta(a) {
 function groupKey(r) { return r.rosterId != null ? 'r' + r.rosterId : 'n:' + (r.name || '').trim().toLowerCase(); }
 // Jahr eines Spiels: bevorzugt das Spiel-Datum (YYYY-MM-DD), sonst der Speicherzeitpunkt
 function gameYear(g) { const m = /^(\d{4})-\d{2}-\d{2}/.exec(String(g && g.date || '')); return m ? Number(m[1]) : new Date(g.savedAt).getFullYear(); }
+// Zeitstempel eines Spiels: bevorzugt das eingetragene Spiel-Datum (12:00 lokal, vermeidet TZ-Kanten), sonst der Speicherzeitpunkt
+function gameTime(g) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(g && g.date || '')); if (m) { const t = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12).getTime(); if (!isNaN(t)) return t; } return Number(g && g.savedAt) || 0; }
+// Sortierung: neuestes Spiel-Datum zuerst, bei Gleichstand zuletzt gespeichertes zuerst
+function byGameDesc(a, b) { return gameTime(b) - gameTime(a) || (b.savedAt || 0) - (a.savedAt || 0); }
 // Liste aller Jahre mit archivierten Spielen (absteigend)
 function archiveYears() { const s = new Set(); for (const g of db.archive) s.add(gameYear(g)); return Array.from(s).sort((a, b) => b - a); }
 // Kegelorte für den Statistik-Filter: alle bekannten Orte (auch inaktive), die im Archiv
@@ -798,8 +802,9 @@ function computeStats(year, place) {
     if (place === 'none') { if (g.placeId != null) continue; }
     else if (place != null && Number(g.placeId) !== Number(place)) continue;
     games++;
-    if (from == null || g.savedAt < from) from = g.savedAt;
-    if (to == null || g.savedAt > to) to = g.savedAt;
+    const gt = gameTime(g);
+    if (from == null || gt < from) from = gt;
+    if (to == null || gt > to) to = gt;
     const ev = evalGame(g); kasse += ev.kasseTotal;
     for (const r of ev.rows) {
       const k = groupKey(r);
@@ -999,7 +1004,7 @@ function buildExportHtml() {
   const st = computeStats();
   const span = (st.summary.from && st.summary.to) ? (fmtDT(st.summary.from).slice(0, 10) + ' – ' + fmtDT(st.summary.to).slice(0, 10)) : '';
   const now = fmtDT(Date.now());
-  const games = db.archive.slice().sort((a, b) => a.savedAt - b.savedAt);
+  const games = db.archive.slice().sort((a, b) => byGameDesc(b, a));
   let h = '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
   h += '<title>KKk58 – Archiv-Export</title><style>';
   h += 'body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#14202b;max-width:1000px;margin:0 auto;padding:24px 16px;line-height:1.4}';
@@ -1539,7 +1544,7 @@ function handle(req, res) {
   if (api === '/logout' && req.method === 'POST') { clearSessionCookie(res); return send(res, 200, { ok: true }); }
   if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, places: db.places, lastBahnen: db.lastBahnen, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView), matrixRoom: publicMatrixRoom(), me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
   if (api === '/roster' && req.method === 'GET') return send(res, 200, { roster: db.roster });
-  if (api === '/archive' && req.method === 'GET') return send(res, 200, { archive: db.archive.map(archiveMeta).sort((a, b) => b.savedAt - a.savedAt) });
+  if (api === '/archive' && req.method === 'GET') return send(res, 200, { archive: db.archive.slice().sort(byGameDesc).map(archiveMeta) });
   if (api === '/export' && req.method === 'GET') {
     const z = n => String(n).padStart(2, '0'); const d = new Date();
     const fname = 'KKk58-Archiv-' + d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + '.html';

@@ -239,6 +239,7 @@
   .arccard:hover{border-color:var(--pine)}
   .arccard .d{flex:0 0 auto;text-align:center;min-width:52px}
   .arccard .d .dd{font-size:1.25rem;font-weight:800;color:var(--pine-dark);line-height:1}
+  .arccard .d .dd.iso{font-size:.95rem;font-variant-numeric:tabular-nums;white-space:nowrap}
   .arccard .d .mm{font-size:.7rem;text-transform:uppercase;color:var(--muted);font-weight:700}
   .arccard .mid{flex:1;min-width:0}
   .arccard .mid .t{font-weight:700}
@@ -2378,9 +2379,9 @@
     const r=await api('/archive'); if(!r.ok){ $("arcList").innerHTML='<div class="arcempty">Konnte Archiv nicht laden.</div>'; $("arcToolbar").style.display="none"; return; }
     const a=r.data.archive||[];
     if(!a.length){ $("arcList").innerHTML='<div class="arcempty">Noch keine gespeicherten Spiele.</div>'; $("arcToolbar").style.display="none"; return; }
-    $("arcList").innerHTML=a.map(g=>{ const d=fmtDate(g.date);
+    $("arcList").innerHTML=a.map(g=>{ const iso=/^\d{4}-\d{2}-\d{2}/.test(g.date||'')?String(g.date).slice(0,10):'';
       const sil=g.silberNames&&g.silberNames.length?('Ⓢ '+g.silberNames.map(esc).join(", ")):'';
-      return '<div class="arccard" data-id="'+g.id+'"><div class="d"><div class="dd">'+d.dd+'</div><div class="mm">'+d.mm+'</div></div>'+
+      return '<div class="arccard" data-id="'+g.id+'"><div class="d"><div class="dd iso">'+(iso||'–')+'</div>'+(iso?'':'<div class="mm">ohne Datum</div>')+'</div>'+
         '<div class="mid"><div class="t">'+(esc(g.event)||'Spiel')+(g.place?(' <span class="placetag">📍 '+esc(g.place)+'</span>'):'')+'</div><div class="s">'+g.players+' Spieler · '+sil+'</div></div>'+
         '<div class="r"><b>'+euro(g.kasseTotal)+'</b><br>'+esc(g.savedBy||'')+'</div></div>';
     }).join("");
