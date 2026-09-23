@@ -2432,9 +2432,13 @@
     });
     h+='</tbody></table></div>';
     h+='<div class="paytotal" style="max-width:none">Kasse gesamt: <b>'+euro(ev.kasseTotal)+'</b></div>';
+    if(me&&effManage()&&(g.placeId==null||me.role==='admin')){ const opts=(places||[]).filter(p=>p.active!==false||p.id===g.placeId);
+      h+='<div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label for="arcPlace">Kegelort:</label><select id="arcPlace"><option value="">'+(g.placeId==null?'– kein Ort –':'– wählen –')+'</option>'+opts.map(p=>'<option value="'+p.id+'"'+(p.id===g.placeId?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select><button class="btn sm" id="arcPlaceSave" type="button">Ort speichern</button></div>'; }
     if(me&&effManage())h+='<div style="margin-top:12px"><button class="btn warn sm" id="arcDel">Dieses Spiel aus dem Archiv löschen</button></div>';
     const det=$("arcDetail"); det.innerHTML=h; det.classList.remove("hidden"); $("arcList").classList.add("hidden");
     $("arcBack").addEventListener("click",loadArchive);
+    const ps=$("arcPlaceSave"); if(ps)ps.addEventListener("click",async()=>{ const v=$("arcPlace").value; if(v===""){toast("Bitte einen Ort wählen.");return;}
+      const rr=await api('/op',{method:'POST',body:{op:{type:'setGamePlace',id,placeId:Number(v),opId:rid()}}}); if(rr.ok){toast("Ort gespeichert.");openGame(id);}else toast((rr.data&&rr.data.error)||"Fehler"); });
     const dl=$("arcDel"); if(dl)dl.addEventListener("click",async()=>{ if(!confirm("Spiel endgültig aus dem Archiv löschen?"))return;
       const rr=await api('/op',{method:'POST',body:{op:{type:'deleteGame',id,opId:rid()}}}); if(rr.ok){toast("Gelöscht.");loadArchive();}else toast((rr.data&&rr.data.error)||"Fehler"); });
   }

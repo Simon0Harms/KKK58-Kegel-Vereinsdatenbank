@@ -663,7 +663,7 @@ function describeOp(op, ctx) {
     case 'setRosterDues': return 'Stamm: Beitragspflicht ' + (op.duesLiable ? 'aktiviert' : 'deaktiviert');
     case 'setRosterContact': return 'Verzeichnis: Kontaktdaten geändert (' + rosterNameById(op.id) + ')';
     case 'removeRoster': return 'Stamm: Spieler gelöscht';
-    case 'archiveChanged': return op.removed ? 'Spiel aus Archiv gelöscht' : 'Spiel gespeichert';
+    case 'archiveChanged': return op.removed ? 'Spiel aus Archiv gelöscht' : (op.placeSet ? 'Kegelort eines Archivspiels gesetzt' : 'Spiel gespeichert');
     case 'addPrize': return 'Preis angelegt: ' + (op.prize ? op.prize.title : '');
     case 'updatePrize': return 'Preis bearbeitet: ' + (op.prize ? op.prize.title : '');
     case 'removePrize': return 'Preis gelöscht';
@@ -1145,6 +1145,16 @@ function applyOp(op, user) {
       const ev = evalGame(snap);
       ev.rows.forEach(r => { if (r.rosterId != null && r.kasse > 0) addLedger('game', r.rosterId, Math.round(r.kasse * 100), 'Spielabrechnung ' + (snap.date || todayStr()) + (snap.event ? ' · ' + snap.event : ''), user.username, snap.date || todayStr(), { archiveId: snap.id }); });
       return { type: 'archiveChanged', id: snap.id };
+    }
+    case 'setGamePlace': {
+      // Kegelort eines archivierten Spiels nachträglich setzen/ändern (nur Verwaltungsrecht)
+      if (!canManage(user.role)) return null;
+      const g = db.archive.find(x => x.id === Number(op.id)); if (!g) return null;
+      // Einen bereits vorhandenen Ort darf nur ein Admin ändern
+      if (g.placeId != null && user.role !== 'admin') return null;
+      const pl = placeById(op.placeId); if (!pl) return null;
+      g.placeId = pl.id; g.placeName = pl.name;
+      return { type: 'archiveChanged', id: g.id, placeSet: true };
     }
     case 'deleteGame': { if (!canManage(user.role)) return null; const b = db.archive.length; db.archive = db.archive.filter(a => a.id !== Number(op.id)); if (db.archive.length === b) return null; db.ledger = db.ledger.filter(e => !(e.kind === 'game' && e.meta && e.meta.archiveId === Number(op.id))); return { type: 'archiveChanged', id: Number(op.id), removed: true }; }
     // ----- Preise (Anlegen/Bearbeiten/Löschen nur mit Verwaltungsrecht) -----
