@@ -635,22 +635,55 @@ function sendPollReminders() {
 }
 function labelKey(k) { return k === 'c9' ? '9' : k === 'cK' ? 'Kränze' : k === 'cP' ? 'Pumpen' : k; }
 function pNameById(id) { const p = db.sheet.players.find(x => x.id === id); return p ? (p.name || '#' + id) : '#' + id; }
-function describeOp(op, ctx) {
+// Vorher-Zustand einer Operation erfassen (für Lösch-/Umbenennungs-/Änderungsmeldungen,
+// da das Objekt nach applyOp nicht mehr bzw. nur noch im neuen Zustand existiert).
+function captureCtx(op) {
+  const c = {}, id = Number(op.id), s = db.sheet;
+  const pick = (arr) => (arr || []).find(x => x.id === id) || null;
   switch (op.type) {
-    case 'setMeta': return (op.field === 'event' ? 'Anlass' : 'Datum') + ' geändert';
-    case 'setPlace': return 'Kegelort ' + (op.value == null ? 'entfernt' : ('gesetzt: ' + (placeNameById(op.value) || '#' + op.value)));
-    case 'addPlace': return 'Kegelort angelegt: ' + (op.place ? op.place.name : '');
-    case 'renamePlace': return 'Kegelort umbenannt in ' + op.name;
-    case 'setPlaceAddress': return 'Adresse des Kegelorts ' + (op.address ? 'gesetzt' : 'entfernt');
-    case 'setPlaceActive': return 'Kegelort ' + (op.active ? 'aktiviert' : 'deaktiviert');
-    case 'removePlace': return 'Kegelort gelöscht';
-    case 'setNote': return (op.field === 'pumpen' ? 'Pumpenkegel-Notiz' : 'Bemerkung') + ' geändert';
-    case 'setPrice': return 'Preis ' + (op.field === 'priceNK' ? '9/Kranz' : 'Pumpe') + ' geändert';
+    case 'removePlayer': { const rp = s.players.find(p => p.id === op.id); c.removedName = rp ? rp.name : ''; break; }
+    case 'setName': { const rp = s.players.find(p => p.id === op.id); c.oldName = rp ? rp.name : ''; break; }
+    case 'setMeta': c.old = s[op.field]; break;
+    case 'setPlace': c.oldPlace = placeNameById(s.placeId); break;
+    case 'setPrice': c.old = s[op.field]; break;
+    case 'renameRoster': case 'removeRoster': { const r = pick(db.roster); c.name = r ? r.name : ''; break; }
+    case 'renamePlace': case 'removePlace': case 'setPlaceAddress': case 'setPlaceActive': { const pl = placeById(op.id); c.name = pl ? pl.name : ''; break; }
+    case 'setGamePlace': case 'deleteGame': { const g = pick(db.archive); if (g) { c.gameDate = g.date; c.gameEvent = g.event; c.oldPlace = g.placeName || placeNameById(g.placeId); } break; }
+    case 'updatePrize': case 'removePrize': { const x = pick(db.prizes); c.name = x ? x.title : ''; break; }
+    case 'updateTrip': case 'removeTrip': { const x = pick(db.trips); c.name = x ? (x.year + ' ' + (x.place || '')).trim() : ''; break; }
+    case 'updateDevelop': case 'removeDevelop': { const x = pick(db.develop); c.name = x ? ((x.date ? fmtD(x.date) : 'ohne Datum') + (x.description ? ' – ' + clip(x.description, 60) : '')) : ''; break; }
+    case 'updateEvent': case 'removeEvent': { const x = pick(db.events); c.name = x ? evText(x) : ''; break; }
+    case 'removePoll': case 'closePoll': { const x = pick(db.polls); c.name = x ? x.question : ''; break; }
+  }
+  return c;
+}
+function clip(t, n) { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
+function quoteDe(t) { return '„' + t + '"'; }
+function euro(v) { return (Number(v) || 0).toFixed(2).replace('.', ',') + ' €'; }
+function evText(e) { return fmtD(e.date) + (e.startTime ? ' ' + e.startTime + (e.endTime ? '–' + e.endTime : '') : '') + (e.text ? ' – ' + e.text : '') + (e.placeName || e.place ? ' (' + (e.placeName || e.place) + ')' : ''); }
+function gameLabel(date, event) { return 'vom ' + fmtD(date) + (event ? ' (' + event + ')' : ''); }
+function sheetLabel() { return 'Liste ' + (db.sheet.date ? 'vom ' + fmtD(db.sheet.date) : '') ; }
+function describeOp(op, ctx) {
+  ctx = ctx || {};
+  const was = (o, n) => (o != null && o !== '' && String(o) !== String(n)) ? ' (vorher: ' + o + ')' : '';
+  switch (op.type) {
+    case 'setMeta': return op.field === 'event'
+      ? 'Anlass ' + (op.value ? 'geändert auf ' + quoteDe(op.value) : 'entfernt') + was(ctx.old, op.value)
+      : 'Datum der Liste geändert auf ' + fmtD(op.value) + (ctx.old && ctx.old !== op.value ? ' (vorher: ' + fmtD(ctx.old) + ')' : '');
+    case 'setPlace': return op.value == null ? ('Kegelort der Liste entfernt' + (ctx.oldPlace ? ' (vorher: ' + ctx.oldPlace + ')' : ''))
+      : ('Kegelort ' + (placeNameById(op.value) || '#' + op.value) + ' für ' + sheetLabel().trim() + ' gesetzt' + was(ctx.oldPlace, placeNameById(op.value)));
+    case 'addPlace': return 'Kegelort angelegt: ' + (op.place ? op.place.name : '') + (op.place && op.place.address ? ' (' + clip(op.place.address, 80) + ')' : '');
+    case 'renamePlace': return 'Kegelort ' + (ctx.name ? ctx.name + ' ' : '') + 'umbenannt in ' + op.name;
+    case 'setPlaceAddress': return 'Adresse des Kegelorts ' + (ctx.name || placeNameById(op.id) || '') + ' ' + (op.address ? 'gesetzt: ' + clip(op.address, 120) : 'entfernt');
+    case 'setPlaceActive': return 'Kegelort ' + (ctx.name || placeNameById(op.id) || '') + (op.active ? ' aktiviert' : ' deaktiviert');
+    case 'removePlace': return 'Kegelort ' + (ctx.name || '') + ' gelöscht';
+    case 'setNote': return (op.field === 'pumpen' ? 'Pumpenkegel-Notiz' : 'Bemerkung') + (op.value ? ' geändert: ' + quoteDe(clip(op.value, 100)) : ' entfernt');
+    case 'setPrice': return 'Preis ' + (op.field === 'priceNK' ? '9/Kranz' : 'Pumpe') + ' geändert auf ' + euro(op.value) + (ctx.old != null && Number(ctx.old) !== Number(op.value) ? ' (vorher: ' + euro(ctx.old) + ')' : '');
     case 'setLane': return 'Bahn ' + (op.lane === 'bohle' ? 'Bohle' : 'Schere') + (op.on ? ' aktiviert' : ' deaktiviert');
     case 'setBahnen': return 'Bahnen gesetzt: ' + (op.bahnen || []).map((d, i) => 'Bahn ' + (i + 1) + ' ' + (d === 'bohle' ? 'Bohle' : 'Schere')).join(', ');
     case 'addPlayer': return 'Spieler hinzugefügt: ' + (op.player ? op.player.name : '') + (op.roster ? ' (neu im Stamm)' : '');
-    case 'removePlayer': return 'Spieler entfernt: ' + (ctx && ctx.removedName || '');
-    case 'setName': return 'Name geändert: ' + op.value;
+    case 'removePlayer': return 'Spieler entfernt: ' + (ctx.removedName || '');
+    case 'setName': return 'Name geändert: ' + (ctx.oldName && ctx.oldName !== op.value ? ctx.oldName + ' → ' : '') + op.value;
     case 'counterDelta': return pNameById(op.id) + ': ' + labelKey(op.key) + ' ' + (op.delta >= 0 ? '+' : '') + op.delta;
     case 'setCounter': return pNameById(op.id) + ': ' + labelKey(op.key) + ' = ' + op.value;
     case 'setScore': return pNameById(op.id) + ': ' + op.key.toUpperCase() + ' = ' + (op.value == null ? '–' : op.value);
@@ -658,28 +691,34 @@ function describeOp(op, ctx) {
     case 'reset': return 'Liste geleert';
     case 'newGame': return 'Neues Spiel begonnen';
     case 'addRoster': return 'Stamm: Spieler angelegt (' + op.person.name + ')';
-    case 'renameRoster': return 'Stamm: umbenannt in ' + op.name;
-    case 'setRosterActive': return 'Stamm: Spieler ' + (op.active ? 'aktiviert' : ('deaktiviert' + (op.leftAt ? ' (Austritt ' + op.leftAt + ')' : '')));
-    case 'setRosterDues': return 'Stamm: Beitragspflicht ' + (op.duesLiable ? 'aktiviert' : 'deaktiviert');
+    case 'renameRoster': return 'Stamm: ' + (ctx.name && ctx.name !== op.name ? ctx.name + ' ' : '') + 'umbenannt in ' + op.name;
+    case 'setRosterActive': return 'Stamm: ' + rosterNameById(op.id) + ' ' + (op.active ? 'aktiviert' : ('deaktiviert' + (op.leftAt ? ' (Austritt ' + fmtD(op.leftAt) + ')' : '')));
+    case 'setRosterDues': return 'Stamm: Beitragspflicht für ' + rosterNameById(op.id) + ' ' + (op.duesLiable ? 'aktiviert' : 'deaktiviert');
     case 'setRosterContact': return 'Verzeichnis: Kontaktdaten geändert (' + rosterNameById(op.id) + ')';
-    case 'removeRoster': return 'Stamm: Spieler gelöscht';
-    case 'archiveChanged': return op.removed ? 'Spiel aus Archiv gelöscht' : (op.placeSet ? 'Kegelort eines Archivspiels gesetzt' : 'Spiel gespeichert');
+    case 'removeRoster': return 'Stamm: Spieler ' + (ctx.name || '') + ' gelöscht';
+    case 'archiveChanged': {
+      if (op.removed) return 'Archivspiel ' + gameLabel(ctx.gameDate, ctx.gameEvent) + ' gelöscht' + (ctx.oldPlace ? ' (Kegelort ' + ctx.oldPlace + ')' : '');
+      const g = db.archive.find(x => x.id === op.id);
+      if (!g) return 'Spiel gespeichert';
+      if (op.placeSet) return 'Kegelort ' + (g.placeName || '') + ' für Archivspiel ' + gameLabel(g.date, g.event) + ' gesetzt' + was(ctx.oldPlace, g.placeName);
+      return 'Spiel ' + gameLabel(g.date, g.event) + ' in ' + (g.placeName || '') + ' gespeichert (' + g.players.length + ' Spieler)';
+    }
     case 'addPrize': return 'Preis angelegt: ' + (op.prize ? op.prize.title : '');
-    case 'updatePrize': return 'Preis bearbeitet: ' + (op.prize ? op.prize.title : '');
-    case 'removePrize': return 'Preis gelöscht';
+    case 'updatePrize': return 'Preis bearbeitet: ' + (op.prize ? op.prize.title : '') + was(ctx.name, op.prize && op.prize.title);
+    case 'removePrize': return 'Preis gelöscht: ' + (ctx.name || '');
     case 'addTrip': return 'Ausflug angelegt: ' + (op.trip ? (op.trip.year + ' ' + (op.trip.place || '')).trim() : '');
-    case 'updateTrip': return 'Ausflug bearbeitet: ' + (op.trip ? (op.trip.year + ' ' + (op.trip.place || '')).trim() : '');
-    case 'removeTrip': return 'Ausflug gelöscht';
-    case 'addDevelop': return 'Chronik: Eintrag angelegt (' + (op.entry && op.entry.date ? op.entry.date : 'ohne Datum') + ')';
-    case 'updateDevelop': return 'Chronik: Eintrag bearbeitet (' + (op.entry && op.entry.date ? op.entry.date : 'ohne Datum') + ')';
-    case 'removeDevelop': return 'Chronik: Eintrag gelöscht';
-    case 'addEvent': return 'Termin angelegt: ' + (op.event ? (fmtD(op.event.date) + (op.event.text ? ' – ' + op.event.text : '')) : '');
-    case 'updateEvent': return 'Termin bearbeitet: ' + (op.event ? (fmtD(op.event.date) + (op.event.text ? ' – ' + op.event.text : '')) : '');
-    case 'removeEvent': return 'Termin gelöscht';
-    case 'addPoll': return 'Abstimmung erstellt: ' + (op.poll ? op.poll.question : '');
-    case 'votePoll': return 'Abgestimmt: ' + (op.poll ? op.poll.question : '') + ' (' + (op.choice === 'yes' ? 'Ja' : 'Nein') + ')';
-    case 'closePoll': return 'Abstimmung beendet: ' + (op.poll ? op.poll.question : '');
-    case 'removePoll': return 'Abstimmung gelöscht';
+    case 'updateTrip': { const n = op.trip ? (op.trip.year + ' ' + (op.trip.place || '')).trim() : ''; return 'Ausflug bearbeitet: ' + n + was(ctx.name, n); }
+    case 'removeTrip': return 'Ausflug gelöscht: ' + (ctx.name || '');
+    case 'addDevelop': return 'Chronik: Eintrag angelegt (' + (op.entry && op.entry.date ? fmtD(op.entry.date) : 'ohne Datum') + (op.entry && op.entry.description ? ' – ' + clip(op.entry.description, 60) : '') + ')';
+    case 'updateDevelop': return 'Chronik: Eintrag bearbeitet (' + (op.entry && op.entry.date ? fmtD(op.entry.date) : 'ohne Datum') + (op.entry && op.entry.description ? ' – ' + clip(op.entry.description, 60) : '') + ')';
+    case 'removeDevelop': return 'Chronik: Eintrag gelöscht (' + (ctx.name || '') + ')';
+    case 'addEvent': return 'Termin angelegt: ' + (op.event ? evText(op.event) : '');
+    case 'updateEvent': { const n = op.event ? evText(op.event) : ''; return 'Termin bearbeitet: ' + n + was(ctx.name, n); }
+    case 'removeEvent': return 'Termin gelöscht: ' + (ctx.name || '');
+    case 'addPoll': return 'Abstimmung erstellt: ' + (op.poll ? quoteDe(op.poll.question) : '');
+    case 'votePoll': return 'Abgestimmt: ' + (op.poll ? quoteDe(op.poll.question) : '') + ' (' + (op.choice === 'yes' ? 'Ja' : 'Nein') + ')';
+    case 'closePoll': return 'Abstimmung beendet: ' + (op.poll ? quoteDe(op.poll.question) : '');
+    case 'removePoll': return 'Abstimmung gelöscht: ' + (ctx.name ? quoteDe(ctx.name) : '');
     default: return op.type;
   }
 }
@@ -1582,8 +1621,7 @@ function handle(req, res) {
       if (body.op.type === 'saveGame' && me.role !== 'admin' && throwsUnequal(db.sheet)) {
         return send(res, 422, { error: 'Ungleiche Wurf-Anzahl – nur ein Admin kann ein solches Spiel speichern.' });
       }
-      const ctx = {};
-      if (body.op.type === 'removePlayer') { const rp = db.sheet.players.find(p => p.id === body.op.id); ctx.removedName = rp ? rp.name : ''; }
+      const ctx = captureCtx(body.op);
       const norm = applyOp(body.op, me);
       if (!norm) return send(res, 422, { error: 'ungültige Operation' });
       const logEntry = pushLog(me, norm, ctx);
