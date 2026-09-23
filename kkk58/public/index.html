@@ -31,6 +31,7 @@
   html,body{margin:0}
   body{background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.35;-webkit-text-size-adjust:100%;padding:0 10px calc(env(safe-area-inset-bottom) + 20px)}
   .wrap{max-width:1040px;margin:0 auto}
+  .wrap:has(#view_sheet:not(.hidden)){max-width:1700px}
   input,button,textarea,select{font-family:inherit;color:inherit}
   .num{font-variant-numeric:tabular-nums}
   .hidden{display:none !important}
@@ -165,12 +166,23 @@
   td.name .pname{font-weight:700;font-size:.98rem}
   .medal{width:24px;height:24px;border-radius:50%;display:inline-grid;place-items:center;font-weight:800;font-size:.78rem;color:#fff;background:var(--muted)}
   .medal.g{background:var(--gold)} .medal.s{background:var(--silver)} .medal.b{background:var(--bronze)} .medal.none{background:#cfd6dc}
-  .step{display:inline-flex;align-items:stretch;border:1px solid var(--line-strong);border-radius:7px;overflow:hidden;height:34px}
-  .step input{width:34px;border:none;text-align:center;font-weight:800;font-size:.95rem;-moz-appearance:textfield;background:#fff}
+  .step{display:inline-grid;grid-template-columns:34px 22px;grid-template-rows:17px 17px;border:1px solid var(--line-strong);border-radius:7px;overflow:hidden;height:36px}
+  .step input{grid-column:1;grid-row:1/3;width:34px;min-width:0;border:none;text-align:center;font-weight:800;font-size:.95rem;-moz-appearance:textfield;background:#fff}
   .step input::-webkit-outer-spin-button,.step input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-  .step .ar{display:flex;flex-direction:column;border-left:1px solid var(--line)}
-  .step .ar button{width:22px;flex:1;border:none;background:#f3f5f7;cursor:pointer;font-size:.7rem;line-height:1;padding:0;color:var(--pine-dark);-webkit-tap-highlight-color:transparent}
-  .step .ar button:first-child{border-bottom:1px solid var(--line)} .step .ar button:active{background:var(--pine-soft)}
+  .step button{grid-column:2;border:none;border-left:1px solid var(--line);background:#f3f5f7;cursor:pointer;font-size:.7rem;line-height:1;padding:0;color:var(--pine-dark);-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none}
+  .step button.up{grid-row:1;border-bottom:1px solid var(--line)} .step button.dn{grid-row:2}
+  .step button:active{background:var(--pine-soft)}
+  .tablewrap{container-type:inline-size}
+  /* Breite Tabelle: − [Wert] + nebeneinander, große Tasten */
+  @container (min-width:1080px){
+    .step{grid-template-columns:44px 40px 44px;grid-template-rows:44px;height:44px}
+    .step button{grid-row:1 !important;font-size:1.3rem;font-weight:800;border:none}
+    .step button.dn{grid-column:1;border-right:1px solid var(--line)}
+    .step button.up{grid-column:3;border-left:1px solid var(--line)}
+    .step input{grid-column:2;grid-row:1;width:40px;font-size:1.1rem}
+    .step button .t{display:none} .step button::after{content:attr(data-w)}
+    .tablewrap input.score{width:60px;height:44px;font-size:1.1rem}
+  }
   input.score{width:50px;height:34px;text-align:center;border:1px solid var(--line-strong);border-radius:7px;font-weight:700;font-size:.98rem;-moz-appearance:textfield}
   input.score::-webkit-outer-spin-button,input.score::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   input.score:focus{outline:2px solid var(--lane);outline-offset:0} input.score.bad{border-color:var(--danger);background:var(--danger-soft)}
@@ -278,7 +290,7 @@
     body{background:#fff;padding:0;font-size:12px}
     header.top{position:static;background:#fff;color:#000;box-shadow:none;border-bottom:2px solid #000;margin:0 0 8px}
     .toprow .eyebrow{opacity:1} .toprow input{color:#000;border:none;background:none;padding:0;font-weight:700}
-    .nav,.btnrow,.who,.addrow,.delbtn,.step .ar,.toast,details.panel{display:none !important}
+    .nav,.btnrow,.who,.addrow,.delbtn,.step button,.toast,details.panel{display:none !important}
     .tablewrap{box-shadow:none;overflow:visible;border-color:#999} tbody tr{break-inside:avoid}
     input.score,.step input{border:none;font-weight:800}
   }
@@ -402,7 +414,7 @@
   html[data-theme="dark"] .step input{background:var(--card);color:var(--ink);border-color:var(--line-strong)}
   html[data-theme="dark"] thead th,
   html[data-theme="dark"] .stbl th{background:#232f37}
-  html[data-theme="dark"] .step .ar button{background:var(--stripe);color:var(--pine-dark)}
+  html[data-theme="dark"] .step button{background:var(--stripe);color:var(--pine-dark)}
   html[data-theme="dark"] .btn.ghost{background:var(--stripe);color:var(--ink)}
   html[data-theme="dark"] .btn.ghost:hover{background:var(--line)}
   html[data-theme="dark"] .acbox{background:var(--card)}
@@ -1417,7 +1429,7 @@
   }
   function stepper(p,key){
     const w=document.createElement("div"); w.className="step";
-    w.innerHTML='<input type="number" class="num" inputmode="numeric" min="0" step="1" data-fkey="ctr:'+p.id+':'+key+'"><div class="ar"><button type="button" class="up">▲</button><button type="button" class="dn">▼</button></div>';
+    w.innerHTML='<input type="number" class="num" inputmode="numeric" min="0" step="1" data-fkey="ctr:'+p.id+':'+key+'"><button type="button" class="up" data-w="+" aria-label="erhöhen"><span class="t">▲</span></button><button type="button" class="dn" data-w="−" aria-label="verringern"><span class="t">▼</span></button>';
     const inp=w.querySelector("input"); inp.value=p[key];
     w.querySelector(".up").addEventListener("click",()=>{p[key]=(p[key]||0)+1;inp.value=p[key];updateDerived();opDelta({type:'counterDelta',id:p.id,key,delta:1});});
     w.querySelector(".dn").addEventListener("click",()=>{p[key]=Math.max(0,(p[key]||0)-1);inp.value=p[key];updateDerived();opDelta({type:'counterDelta',id:p.id,key,delta:-1});});
