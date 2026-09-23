@@ -426,6 +426,9 @@
     font-size:1.15rem;line-height:1;display:grid;place-items:center;padding:0}
   .themebtn:hover{border-color:var(--pine)}
   @media print{.themebtn{display:none !important}}
+  /* Vollbild-Button (links neben dem Theme-Button) */
+  .themebtn.fsbtn{right:64px}
+  .fsbtn.hidden{display:none}
 </style>
 </head>
 <body>
@@ -2681,6 +2684,31 @@
     try{localStorage.setItem("kkk58-theme",next);}catch(e){}
     render();
   });
+  render();
+})();
+</script>
+
+<button id="fsToggle" class="themebtn fsbtn hidden" type="button" aria-label="Vollbild umschalten" title="Vollbild"></button>
+<script>
+(function(){
+  var d=document, el=d.documentElement, btn=d.getElementById("fsToggle");
+  var req=el.requestFullscreen||el.webkitRequestFullscreen;
+  var exit=d.exitFullscreen||d.webkitExitFullscreen;
+  if(!req||!exit) return; /* z. B. iPhone-Safari: kein Fullscreen-API -> Button bleibt verborgen */
+  function cur(){ return d.fullscreenElement||d.webkitFullscreenElement||null; }
+  function render(){ var on=!!cur();
+    btn.textContent=on?"🗗":"⛶";
+    btn.setAttribute("title",on?"Vollbild beenden":"Vollbild");
+    btn.setAttribute("aria-pressed",on?"true":"false"); }
+  btn.addEventListener("click",function(){
+    try{
+      var r=cur()?exit.call(d):req.call(el);
+      if(r&&r.catch) r.catch(function(){});
+    }catch(e){}
+  });
+  d.addEventListener("fullscreenchange",render);
+  d.addEventListener("webkitfullscreenchange",render);
+  btn.classList.remove("hidden");
   render();
 })();
 </script>
