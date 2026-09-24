@@ -422,7 +422,9 @@ function findInvite(token) { const t = String(token || ''); return db.invites.fi
 
 // ---------- Matrix-Login (Verknüpfung + Login-Link) ----------
 // Raum-ID (!id:server) oder Raum-Alias (#alias:server); Gesamtlänge begrenzt.
-function validRoom(s) { s = String(s || '').trim(); return s.length >= 3 && s.length <= 255 && /^[!#][^\s:]+:[^\s:]+$/.test(s) ? s : null; }
+// Raum-IDs ab Raumversion 12 haben keinen Server-Teil mehr (z. B. "!8S62Ah…XOVA"),
+// ältere lauten "!id:server". Aliase brauchen weiterhin "#alias:server".
+function validRoom(s) { s = String(s || '').trim(); return s.length >= 3 && s.length <= 255 && (/^![^\s:]+(:[^\s:]+)?$/.test(s) || /^#[^\s:]+:[^\s:]+$/.test(s)) ? s : null; }
 // Matrix-Benutzer-ID (@name:server); optional, dient nur als Nachschlage-Schlüssel beim Login.
 function validMxid(s) { s = String(s || '').trim(); return s.length >= 3 && s.length <= 255 && /^@[^\s:]+:[^\s:]+$/.test(s) ? s : null; }
 // Kontaktfelder aus dem Mitgliedsverzeichnis, über die man sich zusätzlich anmelden kann.
@@ -550,9 +552,9 @@ function handleMatrixInboxEntry(m) {
     return;
   }
   const roomId = validRoom(m && m.roomId), sender = validMxid(m && m.sender);
-  if (!roomId || roomId[0] !== '!' || !sender) return;
+  if (!roomId || roomId[0] !== '!' || !sender) { console.warn('Matrix-Inbox: Eintrag ignoriert (Raum/Absender ungültig):', m && m.roomId, m && m.sender); return; }
   const bot = matrixBotId(); if (bot && bot.toLowerCase() === sender.toLowerCase()) return;
-  if (m.members != null && Number(m.members) > 2) return; // nur private 1:1-Chats (Sidecar prüft ebenfalls)
+  if (m.members != null && Number(m.members) > 2) { console.warn('Matrix-Inbox: ignoriert, kein 1:1-Chat:', roomId); return; } // nur private 1:1-Chats (Sidecar prüft ebenfalls)
   const code = extractMatrixCode(m.body); if (!code) return;
   const key = sender.toLowerCase();
   if (mxSenderBlocked(key)) return; // gesperrt: auch keine Antwort mehr
@@ -584,7 +586,7 @@ function processMatrixInbox() {
   let names; try { names = fs.readdirSync(MATRIX_INBOX_DIR).filter(n => n.endsWith('.json') && n[0] !== '.').sort(); } catch (_) { return; }
   for (const n of names) {
     const f = path.join(MATRIX_INBOX_DIR, n);
-    let m = null; try { m = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (_) {}
+    let m = null; try { m = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { console.error('Matrix-Inbox: Datei unlesbar', n, e.message); }
     try { fs.unlinkSync(f); } catch (_) {}
     if (!m || (m.type !== 'left' && m.ts && Date.now() - Number(m.ts) > MATRIX_CODE_TTL)) continue; // Altlast: Code wäre ohnehin abgelaufen
     try { handleMatrixInboxEntry(m); } catch (e) { console.error('Matrix-Inbox-Fehler:', e.message); }
