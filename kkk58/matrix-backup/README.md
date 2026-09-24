@@ -91,6 +91,11 @@ Kommunikation über einen **Datei-Spool**:
   Node-App prüft den Code, speichert Raum-ID + Absender-MXID, trägt die MXID im
   Verzeichnis ein und antwortet über die Outbox. Nachrichten älter als
   `KKK_LINK_MAX_AGE` (Standard 300 s) werden ignoriert.
+- **Allein im Raum:** Verlässt jemand einen Raum (oder lehnt eine Einladung ab), merkt
+  der Sidecar den Raum vor und prüft nach dem ohnehin laufenden Sync anhand des lokalen
+  Zustands, ob der Bot allein ist (`joined ≤ 1`, keine offenen Einladungen). Wenn ja,
+  verlässt er ihn und meldet das der App per Inbox (`type: "left"`), die die Verknüpfung
+  löst. Beim Start werden einmalig alle Räume geprüft. Der Vereinsraum ist ausgenommen.
 - Kann der Bot eine Nachricht in einem privaten Chat nicht entschlüsseln (typisch: vor
   seinem Beitritt gesendet), bittet er höchstens einmal pro Stunde um erneutes Senden.
 

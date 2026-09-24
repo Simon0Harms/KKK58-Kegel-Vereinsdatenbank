@@ -31,7 +31,7 @@ try:
     from nio import (
         AsyncClient, AsyncClientConfig, LoginResponse, RoomSendResponse,
         RoomInviteResponse, RoomMessageText, RoomMessageNotice, RoomMessageEmote,
-        MegolmEvent,
+        MegolmEvent, RoomMemberEvent,
     )
 except ImportError:
     sys.stderr.write(
@@ -339,6 +339,9 @@ class MatrixSync:
         self._feed_seen, self._feed_next = self._load_feed_state()
         self._link_seen = set()          # bereits weitergereichte Code-Nachrichten (event_id)
         self._undecrypt_notice = {}      # room_id -> Zeitpunkt des letzten Hinweises
+        # Räume, in denen der Bot evtl. allein ist (room_id -> verbleibende Prüfrunden).
+        # Wird nur durch Mitglieder-Ereignisse/Beitritte gefüllt; leer => keine Arbeit.
+        self._alone_candidates = {}
 
     # ---- Nachrichten-Feed für die Webapp ----
     def _load_feed_state(self):
@@ -466,6 +469,53 @@ class MatrixSync:
         except OSError as e:
             self.log("Inbox-Schreibfehler:", repr(e))
 
+    async def _on_member(self, room, event):
+        """Jemand hat einen Raum verlassen/wurde entfernt oder eine Einladung abgelehnt:
+        Raum für die (billige, rein lokale) Allein-Prüfung vormerken."""
+        try:
+            if getattr(event, "membership", None) in ("leave", "ban") and \
+                    getattr(event, "state_key", None) != self.cfg.user_id:
+                rid = getattr(room, "room_id", None)
+                if rid and rid != self.room_id:
+                    self._alone_candidates[rid] = 3
+        except Exception:
+            pass
+
+    async def _leave_if_alone(self):
+        """Vorgemerkte Räume verlassen, in denen der Bot allein ist. Nutzt nur den
+        lokalen Sync-Zustand (keine zusätzlichen Server-Anfragen, außer zum Verlassen).
+        Der Vereinsraum ist ausgenommen."""
+        if not self._alone_candidates:
+            return
+        for rid in list(self._alone_candidates):
+            room = self.client.rooms.get(rid)
+            if rid == self.room_id:
+                self._alone_candidates.pop(rid, None)
+                continue
+            if room is None:
+                # (noch) nicht im lokalen Zustand, z. B. direkt nach dem Beitritt: später erneut
+                self._alone_candidates[rid] -= 1
+                if self._alone_candidates[rid] <= 0:
+                    self._alone_candidates.pop(rid, None)
+                continue
+            self._alone_candidates.pop(rid, None)
+            try:
+                joined = int(room.joined_count or 0)
+                invited = int(room.invited_count or 0)
+            except Exception:
+                continue
+            if joined <= 1 and invited == 0:
+                try:
+                    await self._leave_room(rid)
+                    self.log("Allein im Raum – verlassen:", rid)
+                    try:
+                        write_spool_file(self.cfg.inbox_dir, {"type": "left", "roomId": rid,
+                                                              "ts": int(time.time() * 1000)})
+                    except OSError as e:
+                        self.log("Inbox-Schreibfehler:", repr(e))
+                except Exception as e:
+                    self.log("Verlassen (allein) fehlgeschlagen:", rid, repr(e))
+
     async def _on_undecryptable(self, room, event):
         """Nicht entschlüsselbare Nachricht in einem privaten Bot-Chat (typisch: vor dem
         Beitritt des Bots gesendet). Einmal je Raum und Stunde um erneutes Senden bitten."""
@@ -545,6 +595,7 @@ class MatrixSync:
             (RoomMessageText, RoomMessageNotice, RoomMessageEmote),
         )
         self.client.add_event_callback(self._on_undecryptable, (MegolmEvent,))
+        self.client.add_event_callback(self._on_member, (RoomMemberEvent,))
 
         # Ersten Sync ausführen: lädt Räume + Geräteschlüssel (und die Timeline -> Feed)
         await self.client.sync(timeout=30000, full_state=True)
@@ -622,6 +673,8 @@ class MatrixSync:
             try:
                 await self.client.join(rid)
                 self.log("Einladung angenommen (Raum beigetreten):", rid)
+                # Einladender könnte schon wieder weg sein -> nach dem nächsten Sync prüfen
+                self._alone_candidates[rid] = 3
             except Exception as e:
                 self.log("Beitritt fehlgeschlagen:", rid, repr(e))
 
@@ -835,6 +888,11 @@ class MatrixSync:
         except OSError:
             pass
         await self.process_outbox()
+        # Einmalig beim Start: alle Räume prüfen (Austritte während der Offline-Zeit)
+        for rid in list(self.client.rooms):
+            if rid != self.room_id:
+                self._alone_candidates[rid] = 1
+        await self._leave_if_alone()
         try:
             last_mtime = os.path.getmtime(self.cfg.db_file)
         except OSError:
@@ -848,6 +906,8 @@ class MatrixSync:
                     await self.client.keys_upload()
                 # Neue 1:1-Chats sofort annehmen, damit Nutzer ihren Verknüpfungscode schicken können
                 await self._join_invites()
+                # Nur vorgemerkte Räume prüfen (durch Mitglieder-Ereignisse) – sonst keine Arbeit
+                await self._leave_if_alone()
             except Exception as e:
                 self.log("Feed-Sync-Hinweis (fahre fort):", repr(e))
             # Sende-Aufträge (Codes/Login-Links) zeitnah abarbeiten

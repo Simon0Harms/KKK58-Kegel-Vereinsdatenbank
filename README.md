@@ -725,6 +725,10 @@ sein.
 - **„Verknüpfung entfernen"** (oder Neu-Verknüpfen mit einem anderen Chat): der Bot
   schickt eine kurze Abschiedsnachricht und **verlässt den bisherigen Chat-Raum**. Der
   Vereinsraum ist davon ausgenommen, ebenso ein Raum, den noch ein anderes Konto nutzt.
+- Ist der Bot in einem Raum **allein** (Nutzer hat den Chat verlassen), verlässt er ihn
+  ebenfalls; eine Verknüpfung auf diesen Raum wird in der App gelöst. Geprüft wird
+  ereignisgesteuert (nur nach Austritten/Beitritten, einmal beim Start) anhand des
+  lokalen Sync-Zustands – ohne zusätzliche Server-Abfragen.
 - Die Login-Anforderung antwortet **immer generisch** – kein Rückschluss, ob ein Konto
   existiert oder verknüpft ist.
 - Für absolute Login-Links `KKK_PUBLIC_URL` setzen (siehe Abschnitt 2).

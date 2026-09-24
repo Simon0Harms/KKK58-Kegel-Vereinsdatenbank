@@ -541,6 +541,14 @@ const mxSenderFails = new Map(); // mxid -> { n, since }
 function mxSenderBlocked(mxid) { const f = mxSenderFails.get(mxid); if (!f) return false; if (Date.now() - f.since > MX_SENDER_WINDOW) { mxSenderFails.delete(mxid); return false; } return f.n >= MX_SENDER_MAX_FAILS; }
 function mxSenderFail(mxid) { const f = mxSenderFails.get(mxid); if (!f || Date.now() - f.since > MX_SENDER_WINDOW) mxSenderFails.set(mxid, { n: 1, since: Date.now() }); else f.n++; }
 function handleMatrixInboxEntry(m) {
+  // Sidecar hat einen Raum verlassen, weil er dort allein war: Verknüpfungen darauf lösen
+  if (m && m.type === 'left') {
+    const rid = validRoom(m.roomId); if (!rid) return;
+    let n = 0;
+    for (const u of db.users) if (u.matrix && u.matrix.roomId === rid) { delete u.matrix; n++; console.log('Matrix-Verknüpfung gelöst (Raum leer):', u.username, rid); }
+    if (n) flushDb();
+    return;
+  }
   const roomId = validRoom(m && m.roomId), sender = validMxid(m && m.sender);
   if (!roomId || roomId[0] !== '!' || !sender) return;
   const bot = matrixBotId(); if (bot && bot.toLowerCase() === sender.toLowerCase()) return;
@@ -578,7 +586,7 @@ function processMatrixInbox() {
     const f = path.join(MATRIX_INBOX_DIR, n);
     let m = null; try { m = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (_) {}
     try { fs.unlinkSync(f); } catch (_) {}
-    if (!m || (m.ts && Date.now() - Number(m.ts) > MATRIX_CODE_TTL)) continue; // Altlast: Code wäre ohnehin abgelaufen
+    if (!m || (m.type !== 'left' && m.ts && Date.now() - Number(m.ts) > MATRIX_CODE_TTL)) continue; // Altlast: Code wäre ohnehin abgelaufen
     try { handleMatrixInboxEntry(m); } catch (e) { console.error('Matrix-Inbox-Fehler:', e.message); }
   }
 }
