@@ -687,13 +687,14 @@ anmelden, den der KKk58-Bot in einen persönlichen Matrix-Chat schickt.
 
 **Einrichten (je Mitglied, einmalig):**
 
-1. Im Matrix-Client einen **privaten 1:1-Chat mit dem KKk58-Bot** starten (den Bot
-   einladen). Der Sidecar nimmt die Einladung automatisch an (nach spätestens einem
-   Poll-Intervall, Standard 15 s).
-2. In der App **oben auf den eigenen Namen** klicken → **Matrix-Login** →
-   **„Bestätigungscode erzeugen"**. Die App zeigt einen Code der Form `KKK-XXXX-XXXX`.
-3. Diesen Code **dem Bot im privaten Chat schicken** (Groß-/Kleinschreibung,
-   Leerzeichen und Bindestriche sind egal).
+1. In der App **oben auf den eigenen Namen** klicken → **Matrix-Login** →
+   **„Bestätigungscode erzeugen"**. Die App zeigt einen Code der Form `KKK-XXXX-XXXX`
+   (plus Bot-MXID und `matrix.to`-Link), **5 Minuten** gültig.
+2. Im Matrix-Client einen **neuen privaten Chat mit dem KKk58-Bot** starten und ihm den
+   Code als **erste Nachricht** schicken – erst dadurch entsteht der Raum. Der Sidecar
+   nimmt die Einladung automatisch an (nach spätestens einem Poll-Intervall, Standard
+   15 s) und liest die Nachricht aus der Raum-Historie.
+3. Groß-/Kleinschreibung, Leerzeichen und Bindestriche im Code sind egal.
 4. Der Sidecar reicht die Nachricht an die App weiter; die App merkt sich
    **Raum-ID des Chats** und **Absender-MXID**, trägt die MXID bei der zugeordneten
    Person im **Verzeichnis** ein (bei Änderung inkl. Einladung in den Vereinsraum) und
@@ -716,8 +717,8 @@ sein.
   abhängigkeitsfrei, der Sidecar sendet **verschlüsselt**.
 - Der Sidecar leitet nur Nachrichten weiter, die **nicht** aus dem Vereinsraum stammen,
   aus einem Raum mit **höchstens 2 Mitgliedern** kommen, nicht vom Bot selbst sind, nicht
-  älter als 10 min sind und wie ein `KKK-`-Code aussehen.
-- Codes (10 min, 40 Bit) und Login-Links (5 min) sind kurzlebig und einmal einlösbar; der
+  älter als 5 min sind und wie ein `KKK-`-Code aussehen.
+- Codes (5 min, 40 Bit) und Login-Links (5 min) sind kurzlebig und einmal einlösbar; der
   Verknüpfungscode wird nur **gehasht** in `db.json` gehalten (`matrixPending`). Falsche
   Codes werden je Absender begrenzt (max. 10 Fehlversuche in 10 min, danach Funkstille).
 - Ist eine MXID bereits mit einem anderen Konto verknüpft, wird die Verknüpfung abgelehnt.

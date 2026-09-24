@@ -109,7 +109,7 @@ class Config:
         # Eingangs-Spool (Gegenrichtung): Nachrichten mit Verknüpfungscode aus privaten
         # Bot-Chats; die Node-App liest und löscht sie. Muss mit deren KKK_INBOX_DIR übereinstimmen.
         self.inbox_dir = env("KKK_INBOX_DIR", os.path.join(os.path.dirname(self.db_file) or ".", "matrix-inbox"))
-        self.link_max_age = int(env("KKK_LINK_MAX_AGE", "600"))  # ältere Code-Nachrichten ignorieren (Sek.)
+        self.link_max_age = int(env("KKK_LINK_MAX_AGE", "300"))  # ältere Code-Nachrichten ignorieren (Sek.)
         self.store_path = env("KKK_MATRIX_STORE", "/opt/kkk58/matrix-store")
         self.state_file = env("KKK_MATRIX_STATE", "/opt/kkk58/matrix-store/sidecar-state.json")
         self.poll_seconds = int(env("KKK_POLL_SECONDS", "15"))

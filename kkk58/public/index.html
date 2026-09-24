@@ -547,20 +547,20 @@
   <div class="login">
     <div class="eyebrow">Konto · Matrix-Login</div>
     <h1>Matrix-Login</h1>
-    <p class="mxintro">Verknüpfe einen privaten Chat mit dem KKk58-Bot, um dir künftig einen Login-Link (5 Minuten gültig) statt eines Passworts schicken zu lassen.</p>
+    <p class="mxintro">Erzeuge einen Code und schicke ihn dem KKk58-Bot in einem privaten Chat, um dir künftig einen Login-Link (5 Minuten gültig) statt eines Passworts schicken zu lassen.</p>
     <div id="mx_status" class="mxstatus"></div>
 
     <div id="mx_linkbox">
-      <ol class="mxsteps">
-        <li>Starte in deinem Matrix-Client einen <b>privaten Chat</b> mit dem KKk58-Bot<span id="mx_botname"></span> und warte, bis er beigetreten ist.</li>
-        <li>Erzeuge hier einen Bestätigungscode und <b>schicke ihn dem Bot</b> als Nachricht.</li>
-        <li>Fertig – Raum und Matrix-ID werden automatisch übernommen und im Verzeichnis eingetragen.</li>
-      </ol>
       <button id="mx_reqcode" type="button">Bestätigungscode erzeugen</button>
       <div id="mx_codebox" class="hidden">
         <div class="mxcode" id="mx_code"></div>
         <button id="mx_copy" type="button" class="btn ghost" style="width:100%">Code kopieren</button>
-        <p class="mxhint" id="mx_wait">Warte auf deine Nachricht an den Bot … (Code 10 Minuten gültig)</p>
+        <ol class="mxsteps" style="margin-top:12px">
+          <li>Starte in deinem Matrix-Client einen <b>neuen privaten Chat</b> mit dem KKk58-Bot<span id="mx_botname"></span><a id="mx_botlink" class="hidden" href="#" target="_blank" rel="noopener"> – hier öffnen</a>.</li>
+          <li>Schicke ihm den Code als <b>erste Nachricht</b> – damit entsteht der Chat, der Bot tritt automatisch bei.</li>
+          <li>Fertig – Raum und Matrix-ID werden übernommen und im Verzeichnis eingetragen.</li>
+        </ol>
+        <p class="mxhint" id="mx_wait">Warte auf deine Nachricht an den Bot … (Code 5 Minuten gültig, kann bis ca. 30 s dauern)</p>
         <button id="mx_cancel" type="button" class="btn ghost" style="width:100%;margin-top:6px">Abbrechen</button>
       </div>
     </div>
@@ -1189,6 +1189,7 @@
     if(!r.ok){ $("mx_err").textContent=(r.data&&r.data.error)||"Konnte keinen Code erzeugen"; return; }
     $("mx_code").textContent=r.data.code;
     $("mx_botname").textContent=r.data.bot?(" ("+r.data.bot+")"):"";
+    if(r.data.bot){ $("mx_botlink").href="https://matrix.to/#/"+encodeURIComponent(r.data.bot); $("mx_botlink").classList.remove("hidden"); }
     mxSince=r.data.since;
     me.matrix=Object.assign({},me.matrix||{},{pending:true,expires:r.data.expires,since:r.data.since});
     renderMatrixDialog();

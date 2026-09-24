@@ -74,18 +74,19 @@ Kommunikation über einen **Datei-Spool**:
 - Der Sidecar arbeitet den Spool bei jedem Poll-Durchlauf ab und **löscht** die Datei
   nach Erfolg.
 - Aufträge, die älter als `KKK_OUTBOX_TTL` (Standard 900 s) sind, werden verworfen –
-  die Codes/Links sind bis dahin ohnehin abgelaufen (Code 10 min, Login-Link 5 min).
+  die Codes/Links sind bis dahin ohnehin abgelaufen (Code 5 min, Login-Link 5 min).
   **Einladungen sind davon ausgenommen** (nicht zeitkritisch) und bleiben erhalten,
   bis sie zugestellt sind oder `KKK_OUTBOX_MAX_ATTEMPTS` erreicht ist.
 - Der Sidecar **nimmt Raum-Einladungen automatisch an** (bei jedem Poll-Durchlauf). So
-  kann ein Mitglied im Matrix-Client einen 1:1-Chat mit dem Bot starten.
+  entsteht der 1:1-Chat, sobald ein Mitglied dem Bot eine Direktnachricht schreibt; die
+  bereits gesendete Code-Nachricht wird nach dem Beitritt aus der Timeline gelesen.
 - **Gegenrichtung (Verknüpfung):** Schickt jemand dem Bot in einem privaten Chat
   (≤ 2 Mitglieder, nicht der Vereinsraum) eine Nachricht mit einem Code der Form
   `KKK-XXXX-XXXX`, legt der Sidecar sie als JSON (`roomId`, `sender`, `body`, `ts`,
   `members`) in `KKK_INBOX_DIR` ab (Standard: `<db-Verzeichnis>/matrix-inbox`). Die
   Node-App prüft den Code, speichert Raum-ID + Absender-MXID, trägt die MXID im
   Verzeichnis ein und antwortet über die Outbox. Nachrichten älter als
-  `KKK_LINK_MAX_AGE` (Standard 600 s) werden ignoriert.
+  `KKK_LINK_MAX_AGE` (Standard 300 s) werden ignoriert.
 - Kann der Bot eine Nachricht in einem privaten Chat nicht entschlüsseln (typisch: vor
   seinem Beitritt gesendet), bittet er höchstens einmal pro Stunde um erneutes Senden.
 

@@ -46,7 +46,7 @@ const MATRIX_FEED_FILE = String(process.env.KKK_FEED_FILE || path.join(DATA_DIR,
 const MATRIX_SAY_MAX = 2000;  // max. Zeichen je Relay-Nachricht aus der Webapp in den Raum
 const POLL_REMINDER_INTERVAL = 7 * 864e5; // wöchentlich an offene Stimmen erinnern
 const MAX = 180;
-const MATRIX_CODE_TTL = 10 * 60 * 1000; // Verknüpfungscode: 10 Minuten gültig
+const MATRIX_CODE_TTL = 5 * 60 * 1000;  // Verknüpfungscode: 5 Minuten gültig
 const MATRIX_MAGIC_TTL = 5 * 60 * 1000;  // Matrix-Login-Link: 5 Minuten gültig
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
