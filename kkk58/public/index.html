@@ -1670,6 +1670,9 @@
   let dirEditId=null;
   const telLink=v=>v?('<a href="tel:'+encodeURIComponent(v)+'">'+esc(v)+'</a>'):'<span class="dir-empty" style="padding:0">–</span>';
   const mailLink=v=>v?('<a href="mailto:'+encodeURIComponent(v)+'">'+esc(v)+'</a>'):'<span class="dir-empty" style="padding:0">–</span>';
+  const mxLink=v=>{ v=(v||'').trim(); if(!v)return '<span class="dir-empty" style="padding:0">–</span>';
+    if(!/^@[^:\s]+:\S+$/.test(v))return esc(v);
+    return '<a href="https://matrix.to/#/'+encodeURIComponent(v)+'" target="_blank" rel="noopener">'+esc(v)+'</a>'; };
   const dirCell=v=>v?esc(v):'<span class="dir-empty" style="padding:0">–</span>';
   function dirMatch(r,ql){ if(!ql)return true; const hay=[r.name,r.telefonPrivat,r.telefonDienst,r.handy,r.emailPrivat,r.emailDienst,r.adresse,r.mxid,r.geburtsdatum].join(' ').toLowerCase(); return hay.indexOf(ql)!==-1; }
   function renderDirectory(){ const tb=$("dirTable"); if(!tb)return; const manage=me&&effManage();
@@ -1685,7 +1688,7 @@
         '<td>'+telLink(r.telefonPrivat)+'</td><td>'+telLink(r.telefonDienst)+'</td><td>'+telLink(r.handy)+'</td>'+
         '<td>'+mailLink(r.emailPrivat)+'</td><td>'+mailLink(r.emailDienst)+'</td>'+
         '<td>'+(r.geburtsdatum?esc(fmtLeft(r.geburtsdatum)):'<span class="dir-empty" style="padding:0">–</span>')+'</td>'+
-        '<td>'+dirCell(r.adresse)+'</td><td>'+dirCell(r.mxid)+'</td>'+
+        '<td>'+dirCell(r.adresse)+'</td><td>'+mxLink(r.mxid)+'</td>'+
         '<td style="text-align:right">'+act+'</td></tr>';
     }).join("");
     tb.querySelectorAll('[data-diredit]').forEach(b=>b.addEventListener("click",()=>openDirEdit(Number(b.dataset.diredit))));
