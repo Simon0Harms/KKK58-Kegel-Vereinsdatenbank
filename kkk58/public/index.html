@@ -51,6 +51,9 @@
   .mxstatus.ok{color:var(--pine-dark)} .mxstatus.no{color:var(--muted)}
   .mxintro{color:var(--muted);font-size:.85rem;margin:0 0 8px}
   .mxhint{color:var(--muted);font-size:.76rem;margin:6px 0 0}
+  .mxsteps{color:var(--muted);font-size:.85rem;margin:0 0 12px;padding-left:1.2em}
+  .mxsteps li{margin:4px 0}
+  .mxcode{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.6rem;font-weight:800;letter-spacing:.08em;text-align:center;padding:14px 8px;margin:4px 0 10px;border:2px dashed var(--muted);border-radius:10px;user-select:all}
   .mxroom{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
   .mxf-wrap{margin-top:14px}
   .mxfeed{max-height:60vh;overflow-y:auto;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card);display:flex;flex-direction:column;gap:8px;-webkit-overflow-scrolling:touch}
@@ -500,8 +503,8 @@
     </p>
     <p style="color:var(--muted);font-size:.82rem;margin:12px 0 0;line-height:1.5">
       <b>Matrix-Login:</b> Wenn du magst, kannst du dich künftig auch ganz ohne Passwort anmelden.
-      Verknüpfe dazu später unter <b>Konto → Matrix-Login</b> (Klick auf deinen Namen oben) deinen
-      persönlichen KKk58-Bot-Chat; danach lässt du dir zum Anmelden einfach einen Login-Link
+      Verknüpfe dazu später unter <b>Konto → Matrix-Login</b> (Klick auf deinen Namen oben) einen
+      privaten Chat mit dem KKk58-Bot, indem du ihm den angezeigten Code schickst; danach lässt du dir zum Anmelden einfach einen Login-Link
       (5 Minuten gültig) per Matrix schicken.
     </p>
   </div>
@@ -544,27 +547,22 @@
   <div class="login">
     <div class="eyebrow">Konto · Matrix-Login</div>
     <h1>Matrix-Login</h1>
-    <p class="mxintro">Verknüpfe deinen persönlichen KKk58-Bot-Chat, um dir künftig einen Login-Link (5 Minuten gültig) statt eines Passworts schicken zu lassen.</p>
+    <p class="mxintro">Verknüpfe einen privaten Chat mit dem KKk58-Bot, um dir künftig einen Login-Link (5 Minuten gültig) statt eines Passworts schicken zu lassen.</p>
     <div id="mx_status" class="mxstatus"></div>
 
     <div id="mx_linkbox">
-      <label for="mx_room">Raum-ID deines Bot-Chats</label>
-      <input id="mx_room" type="text" autocapitalize="off" autocomplete="off" placeholder="!abc123:matrix.example.org">
-      <p class="mxhint">Die Raum-ID findest du in deinem Matrix-Client in den Raum-Einstellungen (beginnt mit ! oder als Alias mit #). Der KKk58-Bot muss Mitglied des Raums sein.</p>
-
-      <label for="mx_mxid">Deine Matrix-ID <span class="muted2">(optional)</span></label>
-      <input id="mx_mxid" type="text" autocapitalize="off" autocomplete="off" placeholder="@name:matrix.example.org">
-      <p class="mxhint">Optional: Damit kannst du dir den Login-Link später auch über deine Matrix-ID statt deines Benutzernamens schicken lassen.</p>
-
-      <button id="mx_reqcode" type="button">Bestätigungscode senden</button>
-
-      <div id="mx_verifybox" class="hidden">
-        <label for="mx_code">Code aus dem Chat</label>
-        <input id="mx_code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-stelliger Code">
-        <button id="mx_verify" type="button">Code bestätigen</button>
+      <ol class="mxsteps">
+        <li>Starte in deinem Matrix-Client einen <b>privaten Chat</b> mit dem KKk58-Bot<span id="mx_botname"></span> und warte, bis er beigetreten ist.</li>
+        <li>Erzeuge hier einen Bestätigungscode und <b>schicke ihn dem Bot</b> als Nachricht.</li>
+        <li>Fertig – Raum und Matrix-ID werden automatisch übernommen und im Verzeichnis eingetragen.</li>
+      </ol>
+      <button id="mx_reqcode" type="button">Bestätigungscode erzeugen</button>
+      <div id="mx_codebox" class="hidden">
+        <div class="mxcode" id="mx_code"></div>
+        <button id="mx_copy" type="button" class="btn ghost" style="width:100%">Code kopieren</button>
+        <p class="mxhint" id="mx_wait">Warte auf deine Nachricht an den Bot … (Code 10 Minuten gültig)</p>
+        <button id="mx_cancel" type="button" class="btn ghost" style="width:100%;margin-top:6px">Abbrechen</button>
       </div>
-
-      <button id="mx_savemxid" type="button" class="btn ghost hidden" style="width:100%;margin-top:8px">Matrix-ID speichern</button>
     </div>
 
     <button id="mx_unlink" type="button" class="btn warn hidden" style="width:100%;margin-top:10px">Verknüpfung entfernen</button>
@@ -1133,30 +1131,36 @@
 
   // ---------- Matrix-Login einrichten (Dialog über Klick auf den eigenen Namen) ----------
   function mxState(){ return (me&&me.matrix)||null; }
+  let mxLinkTimer=null, mxSince=0;
+  function mxLinkStop(){ if(mxLinkTimer){ clearInterval(mxLinkTimer); mxLinkTimer=null; } }
   function renderMatrixDialog(){
     const st=mxState(); const stEl=$("mx_status"); const verified=!!(st&&st.verified);
-    $("mx_err").textContent="";
+    const showCode=!!(st&&st.pending&&$("mx_code").textContent);
     if(verified){
       stEl.className="mxstatus ok";
       stEl.innerHTML='✓ Verknüpft mit Raum <span class="mxroom">'+esc(st.roomId)+'</span>'+(st.mxid?('<br>Matrix-ID: <span class="mxroom">'+esc(st.mxid)+'</span>'):'');
-      $("mx_unlink").classList.remove("hidden");
-      $("mx_savemxid").classList.remove("hidden");
-      if(!$("mx_room").value) $("mx_room").value=st.roomId;
     } else {
       stEl.className="mxstatus no";
-      stEl.textContent = (st&&st.pending) ? "Verknüpfung läuft – Code aus dem Chat eingeben." : "Noch nicht verknüpft.";
-      $("mx_unlink").classList.add("hidden");
-      $("mx_savemxid").classList.add("hidden");
-      if(st&&st.roomId&&!$("mx_room").value) $("mx_room").value=st.roomId;
+      stEl.textContent = showCode ? "Verknüpfung läuft – schicke den Code an den Bot." : "Noch nicht verknüpft.";
     }
-    if(st&&st.mxid&&!$("mx_mxid").value) $("mx_mxid").value=st.mxid;
-    $("mx_verifybox").classList.toggle("hidden", !(st&&st.pending));
+    $("mx_unlink").classList.toggle("hidden", !verified);
+    $("mx_reqcode").textContent = verified ? "Neu verknüpfen (anderer Chat)" : "Bestätigungscode erzeugen";
+    $("mx_reqcode").classList.toggle("hidden", showCode);
+    $("mx_codebox").classList.toggle("hidden", !showCode);
+    if(!showCode) mxLinkStop();
+  }
+  async function mxCheck(){
+    const r=await api('/me'); if(!r.ok) return;
+    const st=r.data.matrix; me.matrix=st;
+    if(st&&st.pending) return; // wartet weiter
+    if(st&&st.verified&&st.linkedAt>=mxSince){ $("mx_code").textContent=""; renderMatrixDialog(); toast("Matrix-Login verknüpft"); }
+    else if(!st||!st.pending){ $("mx_code").textContent=""; renderMatrixDialog(); $("mx_err").textContent="Code abgelaufen – bitte neu erzeugen."; }
   }
   function openMatrixDialog(){ if(!me) return; $("mxlink").classList.add("hidden"); $("pwpage").classList.add("hidden"); $("mxdlg").classList.remove("hidden"); }
   function closeMatrixDialog(){ $("mxdlg").classList.add("hidden"); }
-  function openMatrixLink(){ if(!me) return; $("mxdlg").classList.add("hidden"); $("mxlink").classList.remove("hidden"); $("mx_code").value=""; $("mx_err").textContent=""; renderMatrixDialog(); }
+  function openMatrixLink(){ if(!me) return; $("mxdlg").classList.add("hidden"); $("mxlink").classList.remove("hidden"); $("mx_err").textContent=""; renderMatrixDialog(); }
   function openPwPage(){ if(!me) return; $("mxdlg").classList.add("hidden"); $("pwpage").classList.remove("hidden"); $("cpw_cur").value=""; $("cpw_new").value=""; $("cpw_new2").value=""; $("cpw_err").textContent=""; setTimeout(()=>$("cpw_cur").focus(),60); }
-  function backToAccount(){ $("mxlink").classList.add("hidden"); $("pwpage").classList.add("hidden"); $("mxdlg").classList.remove("hidden"); }
+  function backToAccount(){ mxLinkStop(); $("mxlink").classList.add("hidden"); $("pwpage").classList.add("hidden"); $("mxdlg").classList.remove("hidden"); }
   $("mx_open").addEventListener("click",openMatrixLink);
   $("mx_back").addEventListener("click",backToAccount);
   $("pw_open").addEventListener("click",openPwPage);
@@ -1178,37 +1182,29 @@
   $("mx_close").addEventListener("click",closeMatrixDialog);
   $("whoName").addEventListener("click",openMatrixDialog);
   $("mx_reqcode").addEventListener("click",async()=>{
-    $("mx_err").textContent=""; const room=$("mx_room").value.trim();
-    if(!room){ $("mx_err").textContent="Bitte Raum-ID eingeben."; return; }
-    const mxid=$("mx_mxid").value.trim();
-    $("mx_reqcode").disabled=true;
-    const r=await api('/me/matrix/link',{method:'POST',body:{roomId:room,mxid}});
-    $("mx_reqcode").disabled=false;
-    if(r.ok){
-      me.matrix={roomId:r.data.roomId,mxid:mxid||null,pending:true,verified:false,expires:r.data.expires};
-      renderMatrixDialog(); $("mx_verifybox").classList.remove("hidden"); $("mx_code").focus();
-      toast(r.data.queued?"Code gesendet – schau in deinen Bot-Chat":"Code erzeugt (Sidecar prüfen)");
-    } else $("mx_err").textContent=(r.data&&r.data.error)||"Konnte Code nicht senden";
-  });
-  async function verifyMatrixCode(){
-    $("mx_err").textContent=""; const code=$("mx_code").value.trim();
-    if(!/^\d{6}$/.test(code)){ $("mx_err").textContent="Bitte den 6-stelligen Code eingeben."; return; }
-    const r=await api('/me/matrix/verify',{method:'POST',body:{code}});
-    if(r.ok){ me.matrix=r.data.matrix; renderMatrixDialog(); toast("Matrix-Login verknüpft"); }
-    else $("mx_err").textContent=(r.data&&r.data.error)||"Code falsch";
-  }
-  $("mx_verify").addEventListener("click",verifyMatrixCode);
-  $("mx_code").addEventListener("keydown",e=>{if(e.key==='Enter')verifyMatrixCode();});
-  $("mx_savemxid").addEventListener("click",async()=>{
     $("mx_err").textContent="";
-    const r=await api('/me/matrix/mxid',{method:'POST',body:{mxid:$("mx_mxid").value.trim()}});
-    if(r.ok){ me.matrix=r.data.matrix; renderMatrixDialog(); toast($("mx_mxid").value.trim()?"Matrix-ID gespeichert":"Matrix-ID entfernt"); }
-    else $("mx_err").textContent=(r.data&&r.data.error)||"Fehler";
+    $("mx_reqcode").disabled=true;
+    const r=await api('/me/matrix/link',{method:'POST'});
+    $("mx_reqcode").disabled=false;
+    if(!r.ok){ $("mx_err").textContent=(r.data&&r.data.error)||"Konnte keinen Code erzeugen"; return; }
+    $("mx_code").textContent=r.data.code;
+    $("mx_botname").textContent=r.data.bot?(" ("+r.data.bot+")"):"";
+    mxSince=r.data.since;
+    me.matrix=Object.assign({},me.matrix||{},{pending:true,expires:r.data.expires,since:r.data.since});
+    renderMatrixDialog();
+    mxLinkStop(); mxLinkTimer=setInterval(mxCheck,3000);
+  });
+  $("mx_copy").addEventListener("click",async()=>{
+    try{ await navigator.clipboard.writeText($("mx_code").textContent); toast("Code kopiert"); }catch(_){ toast("Kopieren nicht möglich – bitte abtippen"); }
+  });
+  $("mx_cancel").addEventListener("click",async()=>{
+    mxLinkStop(); const r=await api('/me/matrix/cancel',{method:'POST'});
+    $("mx_code").textContent=""; if(r.ok) me.matrix=r.data.matrix; renderMatrixDialog();
   });
   $("mx_unlink").addEventListener("click",async()=>{
     if(!confirm("Matrix-Verknüpfung wirklich entfernen?"))return;
     const r=await api('/me/matrix/unlink',{method:'POST'});
-    if(r.ok){ me.matrix=null; $("mx_room").value=""; $("mx_code").value=""; $("mx_mxid").value=""; renderMatrixDialog(); toast("Verknüpfung entfernt"); }
+    if(r.ok){ me.matrix=null; $("mx_code").textContent=""; renderMatrixDialog(); toast("Verknüpfung entfernt"); }
     else $("mx_err").textContent=(r.data&&r.data.error)||"Fehler";
   });
 

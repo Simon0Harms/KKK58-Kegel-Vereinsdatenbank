@@ -88,7 +88,8 @@ cat /opt/kkk58/data/INITIAL-ADMIN.txt
 | `KKK_ADMIN_USER` / `KKK_ADMIN_PASS` | – | Nur beim allerersten Start relevant |
 | `KKK_PUBLIC_URL` | *(aus Request)* | Öffentliche Basis-URL für absolute **Matrix-Login-Links** (z. B. `https://nas.example.net/kkk58`). Ohne die Variable aus `X-Forwarded-*` abgeleitet. |
 | `KKK_OUTBOX_DIR` | `<DATA_DIR>/matrix-outbox` | Spool für Matrix-Login-Nachrichten (Codes/Login-Links); muss mit dem Sidecar übereinstimmen. |
-| `KKK_MATRIX_ENV_FILE` | `/opt/kkk58/matrix-backup/kkk58-matrix.env` | Env-Datei des Matrix-Sidecars, aus der die Node-App die Raum-Adresse für die Unterseite **Matrix-Raum** ausliest (Schlüssel `KKK_MATRIX_ROOM`). So muss der Raum nur beim Sidecar gepflegt werden. |
+| `KKK_INBOX_DIR` | `<DATA_DIR>/matrix-inbox` | Eingangs-Spool: der Sidecar legt hier Nachrichten mit **Verknüpfungscode** aus privaten Bot-Chats ab; muss mit dem Sidecar übereinstimmen. |
+| `KKK_MATRIX_ENV_FILE` | `/opt/kkk58/matrix-backup/kkk58-matrix.env` | Env-Datei des Matrix-Sidecars (daraus auch `KKK_MATRIX_USER` = Bot-MXID für die Anzeige), aus der die Node-App die Raum-Adresse für die Unterseite **Matrix-Raum** ausliest (Schlüssel `KKK_MATRIX_ROOM`). So muss der Raum nur beim Sidecar gepflegt werden. |
 | `KKK_MATRIX_ROOM` | *(sonst aus `KKK_MATRIX_ENV_FILE`, dann `KKK_CLUB_ROOM`)* | Adresse des Matrix-Vereinsraums (`#alias:server` oder `!id:server`), die auf der Unterseite **Matrix-Raum** samt Beitritts-Link und QR-Code angezeigt wird. Explizit gesetzt hat sie Vorrang vor der Env-Datei. Ohne gültigen Wert weist die Seite auf die fehlende Konfiguration hin. |
 | `KKK_FEED_FILE` | `<DATA_DIR>/matrix-feed.jsonl` | Vom Matrix-Sidecar geschriebener Nachrichten-Feed (JSONL), den die Node-App **nur liest**, um auf der Unterseite **Matrix-Raum** den Nachrichtenverlauf anzuzeigen. Muss mit dem `KKK_FEED_FILE` des Sidecars übereinstimmen. |
 
@@ -686,16 +687,20 @@ anmelden, den der KKk58-Bot in einen persönlichen Matrix-Chat schickt.
 
 **Einrichten (je Mitglied, einmalig):**
 
-1. Im Matrix-Client einen **eigenen 1:1-Raum mit dem KKk58-Bot** starten (den Bot
-   einladen). Der Sidecar nimmt die Einladung automatisch an.
-2. In der App **oben auf den eigenen Namen** klicken → **Matrix-Login**.
-3. Die **Raum-ID** dieses Chats eintragen (beginnt mit `!`, ein Alias mit `#` geht
-   auch) und **„Bestätigungscode senden"** drücken. Optional lässt sich dabei die
-   eigene **Matrix-ID** (`@name:server`) hinterlegen – nur als zusätzlicher
-   Nachschlage-Schlüssel für den Login (siehe unten). Sie kann später über
-   **„Matrix-ID speichern"** geändert oder entfernt werden.
-4. Der Bot schickt einen **6-stelligen Code** in den Chat; diesen in der App eingeben.
-   Das beweist, dass der Raum wirklich dir gehört → Verknüpfung aktiv.
+1. Im Matrix-Client einen **privaten 1:1-Chat mit dem KKk58-Bot** starten (den Bot
+   einladen). Der Sidecar nimmt die Einladung automatisch an (nach spätestens einem
+   Poll-Intervall, Standard 15 s).
+2. In der App **oben auf den eigenen Namen** klicken → **Matrix-Login** →
+   **„Bestätigungscode erzeugen"**. Die App zeigt einen Code der Form `KKK-XXXX-XXXX`.
+3. Diesen Code **dem Bot im privaten Chat schicken** (Groß-/Kleinschreibung,
+   Leerzeichen und Bindestriche sind egal).
+4. Der Sidecar reicht die Nachricht an die App weiter; die App merkt sich
+   **Raum-ID des Chats** und **Absender-MXID**, trägt die MXID bei der zugeordneten
+   Person im **Verzeichnis** ein (bei Änderung inkl. Einladung in den Vereinsraum) und
+   bestätigt im Chat. Die Seite in der App aktualisiert sich von selbst.
+
+Da der Code nur im eingeloggten Browser sichtbar ist und die MXID vom Homeserver als
+Absender kommt, sind damit Konto, Chat-Raum **und** Matrix-ID gleichzeitig nachgewiesen.
 
 **Anmelden:** Auf dem Login-Screen **„Kein Passwort? Login-Link per Matrix anfordern"**
 wählen und **Benutzername oder Matrix-ID** eingeben. Der Bot schickt einen **5 Minuten
@@ -706,11 +711,16 @@ sein.
 
 **Technik/Sicherheit:**
 
-- Node-App und Sidecar tauschen die Nachrichten über einen **Datei-Spool**
-  (`KKK_OUTBOX_DIR`, Standard `data/matrix-outbox`) aus; die Node-App bleibt
+- Node-App und Sidecar tauschen die Nachrichten über **Datei-Spools** aus
+  (`KKK_OUTBOX_DIR` App → Bot, `KKK_INBOX_DIR` Bot → App); die Node-App bleibt
   abhängigkeitsfrei, der Sidecar sendet **verschlüsselt**.
-- Codes (10 min) und Login-Links (5 min) sind kurzlebig und einmal einlösbar; der
-  Verknüpfungscode wird nur **gehasht** in `db.json` gehalten (`matrixPending`).
+- Der Sidecar leitet nur Nachrichten weiter, die **nicht** aus dem Vereinsraum stammen,
+  aus einem Raum mit **höchstens 2 Mitgliedern** kommen, nicht vom Bot selbst sind, nicht
+  älter als 10 min sind und wie ein `KKK-`-Code aussehen.
+- Codes (10 min, 40 Bit) und Login-Links (5 min) sind kurzlebig und einmal einlösbar; der
+  Verknüpfungscode wird nur **gehasht** in `db.json` gehalten (`matrixPending`). Falsche
+  Codes werden je Absender begrenzt (max. 10 Fehlversuche in 10 min, danach Funkstille).
+- Ist eine MXID bereits mit einem anderen Konto verknüpft, wird die Verknüpfung abgelehnt.
 - Die Login-Anforderung antwortet **immer generisch** – kein Rückschluss, ob ein Konto
   existiert oder verknüpft ist.
 - Für absolute Login-Links `KKK_PUBLIC_URL` setzen (siehe Abschnitt 2).

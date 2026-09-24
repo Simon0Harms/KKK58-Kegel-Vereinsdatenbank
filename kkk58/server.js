@@ -25,6 +25,9 @@ const SECRET_FILE = path.join(DATA_DIR, '.session_secret');
 // Spool-Verzeichnis für den Matrix-Sidecar: die Node-App legt hier Sende-Aufträge
 // (Code-/Login-Link-Nachrichten) ab, der Sidecar sendet sie verschlüsselt und löscht die Datei.
 const MATRIX_OUTBOX_DIR = process.env.KKK_OUTBOX_DIR || path.join(DATA_DIR, 'matrix-outbox');
+// Eingangs-Spool (Gegenrichtung): der Sidecar legt hier Nachrichten ab, die in einem privaten
+// Bot-Chat einen Verknüpfungscode enthalten. Die Node-App verarbeitet und löscht sie.
+const MATRIX_INBOX_DIR = process.env.KKK_INBOX_DIR || path.join(DATA_DIR, 'matrix-inbox');
 // Öffentliche Basis-URL (für absolute Login-Links in den Matrix-Raum). Leer => aus Request ableiten.
 const PUBLIC_URL = String(process.env.KKK_PUBLIC_URL || '').replace(/\/+$/, '');
 // Zentraler Vereinsraum für Abstimmungs-Ankündigungen/-Erinnerungen. Leer lassen, wenn der
@@ -48,6 +51,7 @@ const MATRIX_MAGIC_TTL = 5 * 60 * 1000;  // Matrix-Login-Link: 5 Minuten gültig
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 try { fs.mkdirSync(MATRIX_OUTBOX_DIR, { recursive: true, mode: 0o700 }); } catch (_) {}
+try { fs.mkdirSync(MATRIX_INBOX_DIR, { recursive: true, mode: 0o700 }); } catch (_) {}
 
 let SECRET = process.env.SESSION_SECRET || '';
 if (!SECRET) {
@@ -470,7 +474,19 @@ function findUserByLogin(login) {
 function mxidTakenBy(mxid, exceptUserId) { const l = String(mxid).toLowerCase(); return db.users.find(u => u.id !== exceptUserId && u.matrix && u.matrix.mxid && u.matrix.mxid.toLowerCase() === l) || null; }
 function hmacHex(v) { return crypto.createHmac('sha256', SECRET).update(String(v)).digest('hex'); }
 function eqHex(a, b) { const x = Buffer.from(String(a), 'hex'), y = Buffer.from(String(b), 'hex'); return x.length === y.length && x.length > 0 && crypto.timingSafeEqual(x, y); }
-function newMatrixCode() { return String(crypto.randomInt(0, 1000000)).padStart(6, '0'); }
+// Verknüpfungscode: "KKK-XXXX-XXXX" aus 32 gut unterscheidbaren Zeichen (ohne 0/O/1/I) => 40 Bit.
+const MX_CODE_ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function newMatrixCode() { let c = ''; for (let i = 0; i < 8; i++) c += MX_CODE_ALPHA[crypto.randomInt(0, 32)]; return c; }
+function fmtMatrixCode(c) { return 'KKK-' + c.slice(0, 4) + '-' + c.slice(4); }
+// Code aus einem Nachrichtentext ziehen (tolerant gegenüber Groß/Klein, Leerzeichen, Bindestrichen).
+function extractMatrixCode(text) {
+  const m = String(text || '').toUpperCase().match(/KKK[\s-]*([A-Z0-9]{4})[\s-]*([A-Z0-9]{4})/);
+  if (!m) return null; const c = m[1] + m[2];
+  for (const ch of c) if (MX_CODE_ALPHA.indexOf(ch) === -1) return null;
+  return c;
+}
+// MXID des Bots (nur zur Anzeige: „schicke den Code an …").
+function matrixBotId() { return validMxid(process.env.KKK_MATRIX_USER || readEnvFileKey(MATRIX_ENV_FILE, 'KKK_MATRIX_USER')) || null; }
 // Sende-Auftrag für den Sidecar ablegen (atomar via tmp+rename, ein Auftrag = eine Datei).
 function enqueueMatrix(roomId, body) {
   try {
@@ -497,9 +513,55 @@ function enqueueMatrixInvite(roomId, mxid) {
 }
 function matrixInfo(user) {
   if (!user) return null;
-  if (user.matrix && user.matrix.verified) return { roomId: user.matrix.roomId, mxid: user.matrix.mxid || null, verified: true };
-  if (user.matrixPending && user.matrixPending.expires > Date.now()) return { roomId: user.matrixPending.roomId, mxid: user.matrixPending.mxid || null, verified: false, pending: true, expires: user.matrixPending.expires };
+  const pend = user.matrixPending && user.matrixPending.expires > Date.now() ? { pending: true, expires: user.matrixPending.expires, since: user.matrixPending.since || 0 } : {};
+  if (user.matrix && user.matrix.verified) return Object.assign({ roomId: user.matrix.roomId, mxid: user.matrix.mxid || null, verified: true, linkedAt: user.matrix.linkedAt || 0 }, pend);
+  if (pend.pending) return Object.assign({ verified: false }, pend);
   return null;
+}
+// ---------- Matrix-Eingang: Verknüpfungscodes aus privaten Bot-Chats ----------
+// Fehlversuche je Absender begrenzen (Schutz gegen Durchprobieren von Codes).
+const MX_SENDER_MAX_FAILS = 10, MX_SENDER_WINDOW = 10 * 60 * 1000;
+const mxSenderFails = new Map(); // mxid -> { n, since }
+function mxSenderBlocked(mxid) { const f = mxSenderFails.get(mxid); if (!f) return false; if (Date.now() - f.since > MX_SENDER_WINDOW) { mxSenderFails.delete(mxid); return false; } return f.n >= MX_SENDER_MAX_FAILS; }
+function mxSenderFail(mxid) { const f = mxSenderFails.get(mxid); if (!f || Date.now() - f.since > MX_SENDER_WINDOW) mxSenderFails.set(mxid, { n: 1, since: Date.now() }); else f.n++; }
+function handleMatrixInboxEntry(m) {
+  const roomId = validRoom(m && m.roomId), sender = validMxid(m && m.sender);
+  if (!roomId || roomId[0] !== '!' || !sender) return;
+  const bot = matrixBotId(); if (bot && bot.toLowerCase() === sender.toLowerCase()) return;
+  if (m.members != null && Number(m.members) > 2) return; // nur private 1:1-Chats (Sidecar prüft ebenfalls)
+  const code = extractMatrixCode(m.body); if (!code) return;
+  const key = sender.toLowerCase();
+  if (mxSenderBlocked(key)) return; // gesperrt: auch keine Antwort mehr
+  const h = hmacHex(code), now = Date.now();
+  const user = db.users.find(u => u.matrixPending && u.matrixPending.expires > now && eqHex(h, u.matrixPending.codeHash));
+  if (!user) { mxSenderFail(key); enqueueMatrix(roomId, '🎳 KKk58 – Verknüpfung\nDieser Code ist unbekannt oder abgelaufen. Bitte in der App einen neuen Code erzeugen.'); return; }
+  const other = mxidTakenBy(sender, user.id);
+  if (other) { delete user.matrixPending; flushDb(); enqueueMatrix(roomId, '🎳 KKk58 – Verknüpfung\nDeine Matrix-ID ist bereits mit einem anderen KKk58-Konto verknüpft. Entferne dort zuerst die Verknüpfung.'); return; }
+  user.matrix = { roomId, mxid: sender, verified: true, linkedAt: now };
+  delete user.matrixPending;
+  // Matrix-ID im Mitgliedsverzeichnis der zugeordneten Person eintragen (bei Änderung:
+  // Einladung in den Vereinsraum wie beim manuellen Eintragen im Verzeichnis).
+  const r = user.rosterId != null ? db.roster.find(x => x.id === user.rosterId) : null;
+  if (r && String(r.mxid || '').toLowerCase() !== key) {
+    r.mxid = sender;
+    enqueueMatrixInvite(clubRoom(), sender);
+    const e = { ts: now, user: user.username, person: personNameOf(user), text: 'Matrix-ID per Verknüpfung eingetragen: ' + r.name + ' (' + sender + ')' };
+    db.log.push(e); if (db.log.length > LOG_MAX) db.log.splice(0, db.log.length - LOG_MAX);
+    db.version++; saveDb();
+    broadcast({ v: db.version, op: { type: 'setRosterContact', id: r.id, fields: { mxid: sender } }, opId: null, by: user.username, log: e });
+  } else flushDb();
+  enqueueMatrix(roomId, '🎳 KKk58 – Verknüpfung\n✓ Dieser Chat ist jetzt mit dem Konto „' + user.username + '" verknüpft. Login-Links kommen künftig hierher.');
+  console.log('Matrix verknüpft:', user.username, sender, roomId);
+}
+function processMatrixInbox() {
+  let names; try { names = fs.readdirSync(MATRIX_INBOX_DIR).filter(n => n.endsWith('.json') && n[0] !== '.').sort(); } catch (_) { return; }
+  for (const n of names) {
+    const f = path.join(MATRIX_INBOX_DIR, n);
+    let m = null; try { m = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (_) {}
+    try { fs.unlinkSync(f); } catch (_) {}
+    if (!m || (m.ts && Date.now() - Number(m.ts) > MATRIX_CODE_TTL)) continue; // Altlast: Code wäre ohnehin abgelaufen
+    try { handleMatrixInboxEntry(m); } catch (e) { console.error('Matrix-Inbox-Fehler:', e.message); }
+  }
 }
 function createMagic(userId) {
   db.magic = db.magic.filter(x => !x.used && x.expires > Date.now() && x.userId !== userId); // alte des Nutzers ersetzen
@@ -1471,60 +1533,22 @@ function handle(req, res) {
       send(res, 200, { ok: true });
     });
   }
-  // Matrix-Raum verknüpfen: Code in den Raum senden lassen (Nachweis, dass der Raum dem Nutzer gehört)
+  // Matrix-Verknüpfung starten: Code erzeugen und im Browser anzeigen. Der Nutzer schickt ihn
+  // in einem privaten Chat an den Bot; Raum-ID und Absender-MXID übernimmt dann processMatrixInbox().
   if (api === '/me/matrix/link' && req.method === 'POST') {
     if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
-    return readJson(req, body => {
-      const room = validRoom(body && body.roomId);
-      if (!room) return send(res, 422, { error: 'Raum-ID ungültig (z. B. !abc:server oder #alias:server)' });
-      // Optionale MXID (nur Nachschlage-Schlüssel für den Login). Leerer Wert = keine.
-      let mxid = null;
-      if (body && body.mxid != null && String(body.mxid).trim() !== '') {
-        mxid = validMxid(body.mxid);
-        if (!mxid) return send(res, 422, { error: 'Matrix-ID ungültig (z. B. @name:server)' });
-        const taken = mxidTakenBy(mxid, me.id);
-        if (taken) return send(res, 409, { error: 'Diese Matrix-ID ist bereits einem anderen Konto zugeordnet.' });
-      }
-      if (mRateHit('mlink:' + me.id, 30000)) return send(res, 429, { error: 'Bitte kurz warten, bevor du einen neuen Code anforderst.' });
-      const code = newMatrixCode();
-      me.matrixPending = { roomId: room, mxid, codeHash: hmacHex(code), expires: Date.now() + MATRIX_CODE_TTL, tries: 0 };
-      flushDb();
-      const ok = enqueueMatrix(room,
-        '🎳 KKk58 – Verknüpfung\nDein Bestätigungscode: ' + code +
-        '\nGib ihn in der App ein (10 Minuten gültig). Wenn du das nicht warst, ignoriere diese Nachricht.');
-      send(res, 200, { ok: true, queued: ok, roomId: room, expires: me.matrixPending.expires });
-    });
+    if (mRateHit('mlink:' + me.id, 5000)) return send(res, 429, { error: 'Bitte kurz warten, bevor du einen neuen Code anforderst.' });
+    const code = newMatrixCode();
+    const since = Date.now();
+    me.matrixPending = { codeHash: hmacHex(code), since, expires: since + MATRIX_CODE_TTL };
+    flushDb();
+    return send(res, 200, { ok: true, code: fmtMatrixCode(code), bot: matrixBotId(), since, expires: me.matrixPending.expires });
   }
-  // Matrix-Raum verknüpfen: eingegebenen Code prüfen
-  if (api === '/me/matrix/verify' && req.method === 'POST') {
+  // Laufenden Verknüpfungsversuch abbrechen
+  if (api === '/me/matrix/cancel' && req.method === 'POST') {
     if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
-    return readJson(req, body => {
-      const p = me.matrixPending;
-      if (!p || !(p.expires > Date.now())) { if (p) { delete me.matrixPending; flushDb(); } return send(res, 410, { error: 'Kein gültiger Code – bitte neu anfordern.' }); }
-      p.tries = (p.tries || 0) + 1;
-      if (p.tries > 5) { delete me.matrixPending; flushDb(); return send(res, 429, { error: 'Zu viele Fehlversuche – bitte neu anfordern.' }); }
-      const code = String((body && body.code) || '').trim();
-      if (!/^\d{6}$/.test(code) || !eqHex(hmacHex(code), p.codeHash)) { flushDb(); return send(res, 401, { error: 'Code falsch', triesLeft: Math.max(0, 5 - p.tries) }); }
-      // MXID nur übernehmen, wenn sie inzwischen nicht anderweitig vergeben wurde
-      const mxid = (p.mxid && !mxidTakenBy(p.mxid, me.id)) ? p.mxid : null;
-      me.matrix = { roomId: p.roomId, mxid, verified: true, linkedAt: Date.now() };
-      delete me.matrixPending; flushDb();
-      send(res, 200, { ok: true, matrix: matrixInfo(me) });
-    });
-  }
-  // Matrix-ID des verknüpften Kontos setzen/ändern/entfernen (ohne erneute Raum-Verifikation)
-  if (api === '/me/matrix/mxid' && req.method === 'POST') {
-    if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
-    return readJson(req, body => {
-      if (!(me.matrix && me.matrix.verified)) return send(res, 409, { error: 'Erst einen Raum verknüpfen.' });
-      const raw = body && body.mxid != null ? String(body.mxid).trim() : '';
-      if (raw === '') { delete me.matrix.mxid; flushDb(); return send(res, 200, { ok: true, matrix: matrixInfo(me) }); }
-      const mxid = validMxid(raw);
-      if (!mxid) return send(res, 422, { error: 'Matrix-ID ungültig (z. B. @name:server)' });
-      if (mxidTakenBy(mxid, me.id)) return send(res, 409, { error: 'Diese Matrix-ID ist bereits einem anderen Konto zugeordnet.' });
-      me.matrix.mxid = mxid; flushDb();
-      send(res, 200, { ok: true, matrix: matrixInfo(me) });
-    });
+    delete me.matrixPending; flushDb();
+    return send(res, 200, { ok: true, matrix: matrixInfo(me) });
   }
   // Matrix-Verknüpfung entfernen
   if (api === '/me/matrix/unlink' && req.method === 'POST') {
@@ -1815,6 +1839,7 @@ server.listen(PORT, BIND, () => console.log('KKk58 läuft auf http://' + BIND + 
 // Wöchentliche Erinnerung an offene Abstimmungen: alle 6 h prüfen (feuert je Poll höchstens
 // einmal pro Woche), plus einmal kurz nach dem Start.
 setInterval(sendPollReminders, 6 * 3600 * 1000).unref();
+setInterval(processMatrixInbox, 3000).unref();
 setTimeout(sendPollReminders, 60 * 1000).unref();
 function shutdown() { flushDb(); process.exit(0); }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);

@@ -22,6 +22,7 @@ import asyncio
 import gzip
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -30,6 +31,7 @@ try:
     from nio import (
         AsyncClient, AsyncClientConfig, LoginResponse, RoomSendResponse,
         RoomInviteResponse, RoomMessageText, RoomMessageNotice, RoomMessageEmote,
+        MegolmEvent,
     )
 except ImportError:
     sys.stderr.write(
@@ -104,6 +106,10 @@ class Config:
         self.outbox_dir = env("KKK_OUTBOX_DIR", os.path.join(os.path.dirname(self.db_file) or ".", "matrix-outbox"))
         self.outbox_ttl = int(env("KKK_OUTBOX_TTL", "900"))            # Aufträge älter als X Sek. verwerfen (Codes/Links sind dann ohnehin abgelaufen)
         self.outbox_max_attempts = int(env("KKK_OUTBOX_MAX_ATTEMPTS", "5"))
+        # Eingangs-Spool (Gegenrichtung): Nachrichten mit Verknüpfungscode aus privaten
+        # Bot-Chats; die Node-App liest und löscht sie. Muss mit deren KKK_INBOX_DIR übereinstimmen.
+        self.inbox_dir = env("KKK_INBOX_DIR", os.path.join(os.path.dirname(self.db_file) or ".", "matrix-inbox"))
+        self.link_max_age = int(env("KKK_LINK_MAX_AGE", "600"))  # ältere Code-Nachrichten ignorieren (Sek.)
         self.store_path = env("KKK_MATRIX_STORE", "/opt/kkk58/matrix-store")
         self.state_file = env("KKK_MATRIX_STATE", "/opt/kkk58/matrix-store/sidecar-state.json")
         self.poll_seconds = int(env("KKK_POLL_SECONDS", "15"))
@@ -243,6 +249,37 @@ def diff_users(prev_snap, current_users):
     return lines, cur
 
 
+LINK_CODE_RE = re.compile(r"KKK[\s-]*[A-Za-z0-9]{4}[\s-]*[A-Za-z0-9]{4}", re.IGNORECASE)
+
+
+def is_link_candidate(body, sender, bot_id, room_id, club_room_id, members, ts_ms, now_ms, max_age_s):
+    """Soll eine Nachricht als Verknüpfungscode an die Node-App weitergereicht werden?
+    Nur: fremder Absender, nicht der Vereinsraum, privater Chat (<= 2 Mitglieder),
+    frisch genug und mit einem Text, der wie ein KKK-Code aussieht."""
+    if not body or not sender or sender == bot_id:
+        return False
+    if not room_id or room_id == club_room_id:
+        return False
+    if members is not None and members > 2:
+        return False
+    if ts_ms and now_ms - ts_ms > max_age_s * 1000:
+        return False
+    return bool(LINK_CODE_RE.search(str(body)))
+
+
+def write_spool_file(directory, payload):
+    """Eine JSON-Datei atomar (tmp + rename) in ein Spool-Verzeichnis schreiben."""
+    os.makedirs(directory, exist_ok=True)
+    mid = "%x-%s" % (int(time.time() * 1000), os.urandom(8).hex())
+    tmp = os.path.join(directory, "." + mid + ".tmp")
+    fin = os.path.join(directory, mid + ".json")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(dict(payload, id=mid), f)
+    os.replace(tmp, fin)
+    return fin
+
+
 def sanitize_db(db):
     """Zugangsdaten aus dem DB-Abbild entfernen, bevor es hochgeladen wird:
     Passwort-Hashes/Salts je Konto sowie die Einladungs-/Einmal-Login-Tokens.
@@ -300,6 +337,8 @@ class MatrixSync:
         self._outbox_attempts = {}  # id -> Anzahl Fehlversuche (nur im Speicher)
         # Dedup-Set der bereits protokollierten event_ids + nächste laufende Nummer.
         self._feed_seen, self._feed_next = self._load_feed_state()
+        self._link_seen = set()          # bereits weitergereichte Code-Nachrichten (event_id)
+        self._undecrypt_notice = {}      # room_id -> Zeitpunkt des letzten Hinweises
 
     # ---- Nachrichten-Feed für die Webapp ----
     def _load_feed_state(self):
@@ -370,7 +409,10 @@ class MatrixSync:
         """Callback für Textnachrichten im Vereinsraum. nio liefert verschlüsselte
         Ereignisse hier bereits entschlüsselt (sofern die Schlüssel vorliegen)."""
         try:
-            if not self.room_id or getattr(room, "room_id", None) != self.room_id:
+            if not self.room_id:
+                return
+            if getattr(room, "room_id", None) != self.room_id:
+                self._maybe_forward_link(room, event)
                 return
             eid = getattr(event, "event_id", None)
             if not eid or eid in self._feed_seen:
@@ -396,6 +438,54 @@ class MatrixSync:
             self._feed_append(entry)
         except Exception as e:  # ein Callback-Fehler darf den Sync nicht abbrechen
             self.log("Feed-Callback-Fehler (ignoriert):", repr(e))
+
+    def _maybe_forward_link(self, room, event):
+        """Nachricht aus einem privaten Bot-Chat mit KKK-Code in den Eingangs-Spool legen.
+        Die Node-App prüft den Code, merkt sich Raum-ID + Absender und antwortet über die Outbox."""
+        rid = getattr(room, "room_id", None)
+        eid = getattr(event, "event_id", None)
+        if not eid or eid in self._link_seen:
+            return
+        body = getattr(event, "body", None)
+        sender = getattr(event, "sender", "") or ""
+        try:
+            members = int(getattr(room, "member_count", 0) or 0) or None
+        except Exception:
+            members = None
+        ts = int(getattr(event, "server_timestamp", 0) or 0)
+        if not is_link_candidate(body, sender, self.cfg.user_id, rid, self.room_id,
+                                 members, ts, int(time.time() * 1000), self.cfg.link_max_age):
+            return
+        self._link_seen.add(eid)
+        try:
+            write_spool_file(self.cfg.inbox_dir, {
+                "roomId": rid, "sender": sender, "body": str(body)[:500],
+                "ts": ts, "members": members, "eventId": eid,
+            })
+            self.log("Verknüpfungscode empfangen von", sender, "in", rid)
+        except OSError as e:
+            self.log("Inbox-Schreibfehler:", repr(e))
+
+    async def _on_undecryptable(self, room, event):
+        """Nicht entschlüsselbare Nachricht in einem privaten Bot-Chat (typisch: vor dem
+        Beitritt des Bots gesendet). Einmal je Raum und Stunde um erneutes Senden bitten."""
+        try:
+            rid = getattr(room, "room_id", None)
+            if not rid or rid == self.room_id or getattr(event, "sender", "") == self.cfg.user_id:
+                return
+            if int(getattr(room, "member_count", 0) or 0) > 2:
+                return
+            now = time.time()
+            if now - self._undecrypt_notice.get(rid, 0) < 3600:
+                return
+            self._undecrypt_notice[rid] = now
+            await self.client.room_send(rid, "m.room.message",
+                                        {"msgtype": "m.notice",
+                                         "body": "🎳 KKk58: Deine Nachricht konnte ich nicht entschlüsseln "
+                                                 "(vermutlich vor meinem Beitritt gesendet). Bitte schicke sie noch einmal."},
+                                        ignore_unverified_devices=True)
+        except Exception as e:
+            self.log("Hinweis (nicht entschlüsselbar) fehlgeschlagen:", repr(e))
 
     def log(self, *a):
         print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), *a, flush=True)
@@ -454,6 +544,7 @@ class MatrixSync:
             self._on_room_message,
             (RoomMessageText, RoomMessageNotice, RoomMessageEmote),
         )
+        self.client.add_event_callback(self._on_undecryptable, (MegolmEvent,))
 
         # Ersten Sync ausführen: lädt Räume + Geräteschlüssel (und die Timeline -> Feed)
         await self.client.sync(timeout=30000, full_state=True)
@@ -717,6 +808,10 @@ class MatrixSync:
             # Kurzer Sync: liefert neue Raumnachrichten an den Feed-Callback.
             try:
                 await self.client.sync(timeout=0)
+                if self.client.should_upload_keys:
+                    await self.client.keys_upload()
+                # Neue 1:1-Chats sofort annehmen, damit Nutzer ihren Verknüpfungscode schicken können
+                await self._join_invites()
             except Exception as e:
                 self.log("Feed-Sync-Hinweis (fahre fort):", repr(e))
             # Sende-Aufträge (Codes/Login-Links) zeitnah abarbeiten
