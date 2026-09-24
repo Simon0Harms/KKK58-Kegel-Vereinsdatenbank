@@ -722,6 +722,9 @@ sein.
   Verknüpfungscode wird nur **gehasht** in `db.json` gehalten (`matrixPending`). Falsche
   Codes werden je Absender begrenzt (max. 10 Fehlversuche in 10 min, danach Funkstille).
 - Ist eine MXID bereits mit einem anderen Konto verknüpft, wird die Verknüpfung abgelehnt.
+- **„Verknüpfung entfernen"** (oder Neu-Verknüpfen mit einem anderen Chat): der Bot
+  schickt eine kurze Abschiedsnachricht und **verlässt den bisherigen Chat-Raum**. Der
+  Vereinsraum ist davon ausgenommen, ebenso ein Raum, den noch ein anderes Konto nutzt.
 - Die Login-Anforderung antwortet **immer generisch** – kein Rückschluss, ob ein Konto
   existiert oder verknüpft ist.
 - Für absolute Login-Links `KKK_PUBLIC_URL` setzen (siehe Abschnitt 2).

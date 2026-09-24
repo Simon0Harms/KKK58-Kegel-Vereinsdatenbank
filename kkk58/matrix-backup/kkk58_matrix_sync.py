@@ -653,6 +653,24 @@ class MatrixSync:
         if not isinstance(resp, RoomSendResponse):
             raise RuntimeError("room_send: " + repr(resp))
 
+    async def _leave_room(self, room, body=""):
+        """Optional einen Abschiedstext senden, dann den Raum verlassen und vergessen.
+        Ist der Bot gar nicht (mehr) Mitglied, gilt das als Erfolg."""
+        if room not in self.client.rooms:
+            return
+        if body:
+            try:
+                await self._send_to_room(room, body)
+            except Exception as e:  # Abschied ist nett, aber nicht nötig
+                self.log("Abschiedsnachricht nicht gesendet:", room, repr(e))
+        resp = await self.client.room_leave(room)
+        if getattr(resp, "status_code", None):
+            raise RuntimeError("room_leave: " + repr(resp))
+        try:
+            await self.client.room_forget(room)
+        except Exception:
+            pass
+
     async def _invite_to_room(self, room, mxid):
         """Eine Matrix-ID (@name:server) in einen Raum einladen. Alias auflösen und dem
         Raum bei Bedarf beitreten. Ist der Nutzer bereits Mitglied oder schon eingeladen,
@@ -700,7 +718,7 @@ class MatrixSync:
             # TTL nur für zeitkritische Aufträge (Codes/Login-Links). Einladungen sind nicht
             # zeitkritisch und sollen nicht verloren gehen, wenn der Sidecar länger als
             # KKK_OUTBOX_TTL offline war – daher hier von der Altersprüfung ausgenommen.
-            if action != "invite":
+            if action not in ("invite", "leave"):
                 age = time.time() - (msg.get("createdAt", 0) / 1000)
                 if age > self.cfg.outbox_ttl:
                     self.log("Outbox: Auftrag zu alt, verworfen:", name)
@@ -712,6 +730,24 @@ class MatrixSync:
             # und legt "__club__" ab; hier durch den konfigurierten KKK_MATRIX_ROOM ersetzen.
             if room in ("__club__", "@club"):
                 room = self.room_id or self.cfg.room
+            if action == "leave":
+                # Nie den Vereinsraum verlassen (Schutz, auch wenn die App das schon prüft)
+                if not room or room in (self.room_id, self.cfg.room):
+                    self._safe_remove(fpath)
+                    continue
+                try:
+                    await self._leave_room(room, msg.get("body") or "")
+                    self._safe_remove(fpath)
+                    self._outbox_attempts.pop(mid, None)
+                    self.log("Outbox: Raum verlassen", room)
+                except Exception as e:
+                    n = self._outbox_attempts.get(mid, 0) + 1
+                    self._outbox_attempts[mid] = n
+                    self.log("Outbox: Verlassen fehlgeschlagen (Versuch %d) %s: %s" % (n, room, repr(e)))
+                    if n >= self.cfg.outbox_max_attempts:
+                        self._safe_remove(fpath)
+                        self._outbox_attempts.pop(mid, None)
+                continue
             if action == "invite":
                 mxid = msg.get("mxid")
                 if not room or not mxid:

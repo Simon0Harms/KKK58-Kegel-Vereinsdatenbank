@@ -511,6 +511,22 @@ function enqueueMatrixInvite(roomId, mxid) {
     return true;
   } catch (e) { console.error('Matrix-Outbox-Fehler:', e.message); return false; }
 }
+// Auftrag für den Sidecar: optional einen Abschiedstext senden, dann den Raum verlassen.
+// Nur für persönliche Bot-Chats; nie für den Vereinsraum und nicht, solange ein anderes
+// Konto denselben Raum noch verknüpft hat.
+function enqueueMatrixLeave(roomId, body, exceptUserId) {
+  const rid = validRoom(roomId); if (!rid || rid[0] !== '!') return false;
+  const club = validRoom(clubRoom()); if (club && club === rid) return false;
+  if (db.users.some(u => u.id !== exceptUserId && u.matrix && u.matrix.roomId === rid)) return false;
+  try {
+    const id = Date.now().toString(36) + '-' + crypto.randomBytes(8).toString('hex');
+    const tmp = path.join(MATRIX_OUTBOX_DIR, '.' + id + '.tmp');
+    const fin = path.join(MATRIX_OUTBOX_DIR, id + '.json');
+    fs.writeFileSync(tmp, JSON.stringify({ id, action: 'leave', roomId: rid, body: body ? String(body) : '', createdAt: Date.now() }), { mode: 0o600 });
+    fs.renameSync(tmp, fin);
+    return true;
+  } catch (e) { console.error('Matrix-Outbox-Fehler:', e.message); return false; }
+}
 function matrixInfo(user) {
   if (!user) return null;
   const pend = user.matrixPending && user.matrixPending.expires > Date.now() ? { pending: true, expires: user.matrixPending.expires, since: user.matrixPending.since || 0 } : {};
@@ -537,7 +553,10 @@ function handleMatrixInboxEntry(m) {
   if (!user) { mxSenderFail(key); enqueueMatrix(roomId, '🎳 KKk58 – Verknüpfung\nDieser Code ist unbekannt oder abgelaufen. Bitte in der App einen neuen Code erzeugen.'); return; }
   const other = mxidTakenBy(sender, user.id);
   if (other) { delete user.matrixPending; flushDb(); enqueueMatrix(roomId, '🎳 KKk58 – Verknüpfung\nDeine Matrix-ID ist bereits mit einem anderen KKk58-Konto verknüpft. Entferne dort zuerst die Verknüpfung.'); return; }
+  const prevRoom = user.matrix && user.matrix.roomId;
   user.matrix = { roomId, mxid: sender, verified: true, linkedAt: now };
+  // Neu verknüpft mit anderem Chat: den bisherigen Bot-Chat verlassen
+  if (prevRoom && prevRoom !== roomId) enqueueMatrixLeave(prevRoom, '🎳 KKk58 – Dein Konto ist jetzt mit einem anderen Chat verknüpft. Der Bot verlässt diesen Raum.', user.id);
   delete user.matrixPending;
   // Matrix-ID im Mitgliedsverzeichnis der zugeordneten Person eintragen (bei Änderung:
   // Einladung in den Vereinsraum wie beim manuellen Eintragen im Verzeichnis).
@@ -1553,7 +1572,9 @@ function handle(req, res) {
   // Matrix-Verknüpfung entfernen
   if (api === '/me/matrix/unlink' && req.method === 'POST') {
     if (!sameOrigin(req)) return send(res, 403, { error: 'bad origin' });
+    const oldRoom = me.matrix && me.matrix.roomId;
     delete me.matrix; delete me.matrixPending; flushDb();
+    if (oldRoom) enqueueMatrixLeave(oldRoom, '🎳 KKk58 – Verknüpfung aufgehoben\nDieser Chat ist nicht mehr mit deinem KKk58-Konto verknüpft. Der Bot verlässt den Raum.', me.id);
     return send(res, 200, { ok: true, matrix: null });
   }
   if (api === '/qr' && req.method === 'GET') {

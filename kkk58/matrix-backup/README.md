@@ -71,6 +71,10 @@ Kommunikation über einen **Datei-Spool**:
     Sidecar sendet den Text **verschlüsselt** in den Raum.
   - **Einladung** (`action: "invite"`): Felder `roomId` und `mxid`; der Sidecar
     lädt die angegebene Matrix-ID in den Raum ein (`room_invite`).
+  - **Raum verlassen** (`action: "leave"`): Felder `roomId` und optional `body`; der
+    Sidecar sendet ggf. den Abschiedstext, verlässt den Raum (`room_leave`) und vergisst
+    ihn. Wird beim Aufheben einer Verknüpfung bzw. beim Wechsel auf einen anderen Chat
+    abgelegt; der Vereinsraum wird nie verlassen. Wie Einladungen ohne TTL.
 - Der Sidecar arbeitet den Spool bei jedem Poll-Durchlauf ab und **löscht** die Datei
   nach Erfolg.
 - Aufträge, die älter als `KKK_OUTBOX_TTL` (Standard 900 s) sind, werden verworfen –
