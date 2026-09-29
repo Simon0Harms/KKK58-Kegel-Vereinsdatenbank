@@ -333,9 +333,10 @@
   .sftable td.nm{text-align:left;font-weight:700}
   .sftable td.rs{font-weight:800;border-right:2px solid var(--line-strong);min-width:30px}
   .sftable td.rs.hit{color:#1f7a4d} .sftable td.rs.bust{color:var(--danger);text-decoration:line-through}
+  .sftable td.hit input{color:#1f7a4d;font-weight:800;border-color:#1f7a4d} .sftable td.bust input{color:var(--danger);text-decoration:line-through;border-color:var(--danger)} .sftable span.bust{color:var(--danger);text-decoration:line-through}
   .sftable td.tot{font-weight:900;font-size:1rem}
   .sftable tr.win td.nm::after{content:" 🏆"}
-  .sftable input.sfw{width:34px;padding:5px 2px;text-align:center;border:1px solid var(--line-strong);border-radius:6px;font-size:.95rem;font-variant-numeric:tabular-nums}
+  .sftable input.sfw{width:46px;padding:5px 2px;text-align:center;border:1px solid var(--line-strong);border-radius:6px;font-size:.95rem;font-variant-numeric:tabular-nums}
   .sftable input.sfw.empty{background:#fff7e0}
   .sfhint{color:var(--muted);font-size:.84rem;margin:6px 0}
   .sfh3{margin:18px 0 8px;font-size:1.05rem;color:var(--pine-dark)}
@@ -743,7 +744,7 @@
       <button class="btn sm" id="sf_close" type="button">✔ Spiel abschließen</button>
       <button class="btn warn sm hidden" id="sf_reset" type="button">Liste leeren</button>
     </div>
-    <p class="sfhint">Je Runde müssen alle 4 Würfe (0–9) eingetragen werden – auch wenn 21 schon überschritten ist. Ziel: 21 – wer mehr wirft, bekommt für die Runde 0 Punkte. Neue Runde und Abschließen gehen erst, wenn alle Felder ausgefüllt sind; die meisten Punkte über alle Runden gewinnen.</p>
+    <p class="sfhint">Je Spieler und Runde ein Feld: Summe aller 4 Würfe (0–36). Ziel: 21 – wer mehr wirft, bekommt für die Runde 0 Punkte. Abschließen geht erst, wenn alle Felder ausgefüllt sind; die meisten Punkte über alle Runden gewinnen.</p>
     <div class="tablewrap"><table class="sftable"><thead id="sf_thead"></thead><tbody id="sf_tbody"></tbody></table></div>
     <h3 class="sfh3">Statistik 17+4</h3>
     <div class="sfbar">
@@ -2526,10 +2527,10 @@
   const SF_TARGET=21, SF_THROWS=4;
   let sf=null, sfStatDisc="", sfStatYear="";
   const sfDiscLabel=d=>d==="bohle"?"Bohle":d==="schere"?"Schere":"egal";
-  const sfSum=a=>a.reduce((x,v)=>x+(v||0),0);
-  const sfRoundScore=r=>{ const s=sfSum(r); return s>SF_TARGET?0:s; };
-  const sfTotal=p=>p.throws.reduce((x,r)=>x+(r.every(v=>v!=null)?sfRoundScore(r):0),0);
-  function sfComplete(){ return !!sf && sf.players.length>0 && sf.players.every(p=>p.throws.every(r=>r.every(v=>v!=null))); }
+  const SF_ROUND_MAX=36;
+  const sfRoundScore=v=>(v==null||v>SF_TARGET)?0:v;
+  const sfTotal=p=>p.throws.reduce((x,v)=>x+sfRoundScore(v),0);
+  function sfComplete(){ return !!sf && sf.players.length>0 && sf.players.every(p=>p.throws.every(v=>v!=null)); }
   function sfStructKey(){ return sf? (sf.rounds+"|"+sf.players.map(p=>p.id).join(",")) : ""; }
   let sfLastKey=null;
   function renderSf(){ if(!sf||!$("sf_tbody"))return;
@@ -2544,21 +2545,18 @@
     if([...sel.options].some(o=>o.value===cur)) sel.value=cur;
     $("sf_delround").disabled=sf.rounds<=1;
     $("sf_close").disabled=!sfComplete();
-    $("sf_addround").disabled=!sfComplete();
     const key=sfStructKey();
     if(key!==sfLastKey){ sfLastKey=key; sfBuildTable(); } else sfUpdateTable();
   }
   function sfBuildTable(){
-    let h='<tr><th rowspan="2">Spieler</th>';
-    for(let r=0;r<sf.rounds;r++) h+='<th class="rh" colspan="'+(SF_THROWS+1)+'">Runde '+(r+1)+'</th>';
-    h+='<th rowspan="2">Gesamt</th><th rowspan="2"></th></tr><tr>';
-    for(let r=0;r<sf.rounds;r++){ for(let i=0;i<SF_THROWS;i++) h+='<th'+(i===0?' class="rh"':'')+'>'+(i+1)+'</th>'; h+='<th>Σ</th>'; }
-    $("sf_thead").innerHTML=h+'</tr>';
+    let h='<tr><th>Spieler</th>';
+    for(let r=0;r<sf.rounds;r++) h+='<th class="rh">Runde '+(r+1)+'</th>';
+    $("sf_thead").innerHTML=h+'<th>Gesamt</th><th></th></tr>';
     let b='';
-    if(!sf.players.length) b='<tr><td colspan="'+(sf.rounds*(SF_THROWS+1)+3)+'" class="sfhint">Noch keine Spieler.</td></tr>';
+    if(!sf.players.length) b='<tr><td colspan="'+(sf.rounds+3)+'" class="sfhint">Noch keine Spieler.</td></tr>';
     sf.players.forEach(p=>{
       b+='<tr data-sfp="'+p.id+'"><td class="nm">'+esc(p.name)+'</td>';
-      for(let r=0;r<sf.rounds;r++){ for(let i=0;i<SF_THROWS;i++) b+='<td><input class="sfw" inputmode="numeric" maxlength="1" data-sfp="'+p.id+'" data-r="'+r+'" data-i="'+i+'"></td>'; b+='<td class="rs" data-sfrs="'+p.id+':'+r+'"></td>'; }
+      for(let r=0;r<sf.rounds;r++) b+='<td class="rh" data-sfrs="'+p.id+':'+r+'"><input class="sfw" inputmode="numeric" maxlength="2" data-sfp="'+p.id+'" data-r="'+r+'" title="Summe der 4 Würfe"></td>';
       b+='<td class="tot" data-sftot="'+p.id+'"></td><td><button class="btn ghost sm" type="button" data-sfdel="'+p.id+'" title="Spieler entfernen">✕</button></td></tr>';
     });
     $("sf_tbody").innerHTML=b; sfUpdateTable();
@@ -2566,21 +2564,23 @@
   function sfUpdateTable(){
     const max=sf.players.reduce((m,p)=>Math.max(m,sfTotal(p)),0), done=sfComplete();
     sf.players.forEach(p=>{
-      p.throws.forEach((row,r)=>{
-        row.forEach((v,i)=>{ const el=q('input.sfw[data-sfp="'+p.id+'"][data-r="'+r+'"][data-i="'+i+'"]'); if(!el)return; if(el!==document.activeElement) el.value=v==null?"":v; el.classList.toggle("empty",v==null); });
-        const td=q('[data-sfrs="'+p.id+':'+r+'"]'); if(td){ const s=sfSum(row), full=row.every(v=>v!=null); td.textContent=full?String(sfRoundScore(row)):""; td.classList.toggle("hit",full&&s===SF_TARGET); td.classList.toggle("bust",full&&s>SF_TARGET); td.title=!full?"alle 4 Würfe eintragen":(s>SF_TARGET?("überworfen ("+s+")"):""); }
+      p.throws.forEach((v,r)=>{
+        const el=q('input.sfw[data-sfp="'+p.id+'"][data-r="'+r+'"]'); if(el){ if(el!==document.activeElement) el.value=v==null?"":v; el.classList.toggle("empty",v==null); }
+        const td=q('[data-sfrs="'+p.id+':'+r+'"]'); if(td){ td.classList.toggle("hit",v===SF_TARGET); td.classList.toggle("bust",v!=null&&v>SF_TARGET); td.title=(v!=null&&v>SF_TARGET)?("überworfen ("+v+") = 0 Punkte"):""; }
       });
       const t=q('[data-sftot="'+p.id+'"]'); if(t) t.textContent=sfTotal(p);
       const tr=q('tr[data-sfp="'+p.id+'"]'); if(tr) tr.classList.toggle("win",done&&max>0&&sfTotal(p)===max);
     });
   }
-  function sfSetThrowFromInput(el){ const raw=String(el.value).trim(); let v=null; if(raw!==""){ const n=parseInt(raw,10); if(!isFinite(n)){ el.value=""; return; } v=Math.max(0,Math.min(9,n)); el.value=v; }
-    const p=sf.players.find(x=>x.id===Number(el.dataset.sfp)), r=Number(el.dataset.r), i=Number(el.dataset.i);
-    if(!p||p.throws[r][i]===v)return; p.throws[r][i]=v; sfUpdateTable(); $("sf_close").disabled=!sfComplete(); $("sf_addround").disabled=!sfComplete();
-    opStruct({type:'sfSetThrow',id:p.id,round:r,idx:i,value:v}); }
+  function sfSetThrowFromInput(el){ const raw=String(el.value).trim(); let v=null; if(raw!==""){ const n=parseInt(raw,10); if(!isFinite(n)){ el.value=""; return; } v=Math.max(0,Math.min(SF_ROUND_MAX,n)); el.value=v; }
+    const p=sf.players.find(x=>x.id===Number(el.dataset.sfp)), r=Number(el.dataset.r);
+    if(!p||p.throws[r]===v)return; p.throws[r]=v; sfUpdateTable(); $("sf_close").disabled=!sfComplete();
+    opStruct({type:'sfSetThrow',id:p.id,round:r,value:v}); }
   (function wireSf(){
     const tb=$("sf_tbody"); if(!tb)return;
-    tb.addEventListener("input",e=>{ const el=e.target.closest("input.sfw"); if(!el)return; if(String(el.value).length>=1){ sfSetThrowFromInput(el); const all=[...tb.querySelectorAll("input.sfw")]; const nx=all[all.indexOf(el)+1]; if(nx){ nx.focus(); nx.select(); } } });
+    const sfNext=el=>{ const all=[...tb.querySelectorAll("input.sfw")]; const nx=all[all.indexOf(el)+1]; if(nx){ nx.focus(); nx.select(); } else el.blur(); };
+    tb.addEventListener("input",e=>{ const el=e.target.closest("input.sfw"); if(el&&String(el.value).length>=2){ sfSetThrowFromInput(el); sfNext(el); } });
+    tb.addEventListener("keydown",e=>{ const el=e.target.closest("input.sfw"); if(el&&e.key==="Enter"){ e.preventDefault(); sfSetThrowFromInput(el); sfNext(el); } });
     tb.addEventListener("change",e=>{ const el=e.target.closest("input.sfw"); if(el) sfSetThrowFromInput(el); });
     tb.addEventListener("focusin",e=>{ const el=e.target.closest("input.sfw"); if(el) el.select(); });
     tb.addEventListener("click",e=>{ const b=e.target.closest("button[data-sfdel]"); if(!b)return; const p=sf.players.find(x=>x.id===Number(b.dataset.sfdel)); if(p&&confirm(p.name+" aus der 17+4-Liste entfernen?")) opStruct({type:'sfRemovePlayer',id:p.id}); });
@@ -2589,8 +2589,8 @@
     $("sf_disc").addEventListener("click",e=>{ const b=e.target.closest("button[data-sfd]"); if(b&&sf&&b.dataset.sfd!==sf.disc) opStruct({type:'sfSetDisc',disc:b.dataset.sfd}); });
     $("sf_add").addEventListener("click",()=>{ const v=$("sf_addsel").value; if(!v){ toast("Bitte Spieler wählen"); return; } opStruct({type:'sfAddPlayer',rosterId:Number(v)}); $("sf_addsel").value=""; });
     $("sf_addsel").addEventListener("change",()=>$("sf_add").click());
-    $("sf_addround").addEventListener("click",()=>{ if(!sfComplete()){ toast("Erst alle 4 Würfe jeder Runde eintragen"); return; } opStruct({type:'sfAddRound'}); });
-    $("sf_delround").addEventListener("click",()=>{ const r=sf.rounds-1; const has=sf.players.some(p=>p.throws[r].some(v=>v!=null)); if(has&&!confirm("Letzte Runde enthält Würfe – trotzdem entfernen?"))return; opStruct({type:'sfRemoveRound'}); });
+    $("sf_addround").addEventListener("click",()=>opStruct({type:'sfAddRound'}));
+    $("sf_delround").addEventListener("click",()=>{ const r=sf.rounds-1; const has=sf.players.some(p=>p.throws[r]!=null); if(has&&!confirm("Letzte Runde enthält Werte – trotzdem entfernen?"))return; opStruct({type:'sfRemoveRound'}); });
     $("sf_close").addEventListener("click",()=>{ if(!sfComplete()){ toast("Bitte zuerst alle Felder ausfüllen"); return; }
       const max=sf.players.reduce((m,p)=>Math.max(m,sfTotal(p)),0), win=sf.players.filter(p=>sfTotal(p)===max).map(p=>p.name);
       if(confirm("17+4 abschließen?\nSieger: "+win.join(", ")+" mit "+max+" Punkten")) opStruct({type:'sfClose'}); });
@@ -2606,7 +2606,7 @@
   function sfGameHtml(g,ev){ let h='<table class="sftable"><thead><tr><th>Spieler</th>';
     for(let r=0;r<g.rounds;r++) h+='<th class="rh">R'+(r+1)+'</th>'; h+='<th>Gesamt</th></tr></thead><tbody>';
     ev.rows.slice().sort((a,b)=>b.total-a.total).forEach(x=>{ h+='<tr class="'+(x.winner?'win':'')+'"><td class="nm">'+esc(x.name)+'</td>';
-      x.throws.forEach((row,r)=>{ const s=sfSum(row); h+='<td class="rh" title="'+row.join(' · ')+'"><span class="'+(s>SF_TARGET?'bust':'')+'">'+esc(row.join('·'))+'</span> = <b>'+x.roundScores[r]+'</b>'+(s>SF_TARGET?' <small>('+s+')</small>':'')+'</td>'; });
+      x.throws.forEach((v,r)=>{ h+='<td class="rh">'+(v>SF_TARGET?'<span class="bust" title="überworfen">'+v+'</span> = <b>0</b>':'<b>'+v+'</b>')+'</td>'; });
       h+='<td class="tot">'+x.total+'</td></tr>'; });
     return h+'</tbody></table>'; }
   async function loadSfData(){

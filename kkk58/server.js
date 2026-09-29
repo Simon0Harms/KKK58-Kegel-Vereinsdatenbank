@@ -144,18 +144,23 @@ function migrateRow(p, bahnen) {
   return p;
 }
 // ---------- Zusatz-Spielmodus 17+4 ----------
-// Eigenständige Liste neben der Anschreibliste. Je Runde 4 Würfe (je 0–9 Holz);
-// Ziel ist 21. Rundenwert = Summe der 4 Würfe, bei mehr als 21 ("überworfen") 0 Punkte.
+// Eigenständige Liste neben der Anschreibliste. Je Spieler und Runde EIN Feld: die Summe
+// aller 4 Würfe (0–36 Holz). Ziel ist 21; bei mehr als 21 ("überworfen") gibt es 0 Punkte.
 // Beliebig viele Runden. Beim Abschließen (nur wenn alle Felder ausgefüllt sind) werden
 // alle Rundenpunkte addiert; die meisten Punkte gewinnen (Gleichstand = mehrere Sieger).
 // Disziplin: egal | bohle | schere. Abgeschlossene Spiele landen in db.sfArchive (eigene Statistik).
 const SF_DISCS = ['egal', 'bohle', 'schere'];
-const SF_THROWS = 4, SF_TARGET = 21, SF_THROW_MAX = 9, SF_ROUNDS_MAX = 30;
+const SF_THROWS = 4, SF_TARGET = 21, SF_ROUND_MAX = 36, SF_ROUNDS_MAX = 30; // 4 Würfe à max. 9 Holz
 function sfEmpty(disc) { return { event: '', date: '', disc: SF_DISCS.includes(disc) ? disc : 'egal', rounds: 1, seq: 0, players: [] }; }
-function sfThrow(v) { if (v == null || v === '') return null; return cint(v, 0, SF_THROW_MAX, 0); }
+function sfThrow(v) { if (v == null || v === '') return null; return cint(v, 0, SF_ROUND_MAX, 0); }
 function sfNormThrows(t, rounds) {
   const out = [];
-  for (let r = 0; r < rounds; r++) { const row = (Array.isArray(t) && Array.isArray(t[r])) ? t[r] : []; const o = []; for (let i = 0; i < SF_THROWS; i++) o.push(sfThrow(row[i])); out.push(o); }
+  for (let r = 0; r < rounds; r++) {
+    const v = Array.isArray(t) ? t[r] : null;
+    // Altformat [w1..w4] (Einzelwürfe) in Rundensumme überführen – nur wenn vollständig
+    if (Array.isArray(v)) out.push(v.length === SF_THROWS && v.every(x => x != null) ? sfThrow(sumVals(v)) : null);
+    else out.push(sfThrow(v));
+  }
   return out;
 }
 function sfNormSheet(src) {
@@ -167,14 +172,14 @@ function sfNormSheet(src) {
   s.seq = cint(s.seq, 0, 1e9, s.players.reduce((m, p) => Math.max(m, p.id), 0));
   return s;
 }
-function sfRoundScore(row) { if (!row.every(v => v != null)) return 0; const sum = sumVals(row); return sum > SF_TARGET ? 0 : sum; } // zählt nur mit allen 4 Würfen
-function sfComplete(s) { return s.players.length > 0 && s.players.every(p => p.throws.every(r => r.every(v => v != null))); }
+function sfRoundScore(v) { return v == null || v > SF_TARGET ? 0 : v; }
+function sfComplete(s) { return s.players.length > 0 && s.players.every(p => p.throws.every(v => v != null)); }
 // Auswertung eines (Live- oder archivierten) 17+4-Spiels
 function sfEval(g) {
   const rows = (g.players || []).map(p => {
     const rs = (p.throws || []).map(sfRoundScore);
     return { rosterId: p.rosterId != null ? p.rosterId : null, name: p.name, throws: p.throws, roundScores: rs, total: sumVals(rs),
-      hits: (p.throws || []).filter(r => sumVals(r) === SF_TARGET).length, busts: (p.throws || []).filter(r => sumVals(r) > SF_TARGET).length };
+      hits: (p.throws || []).filter(v => v === SF_TARGET).length, busts: (p.throws || []).filter(v => v != null && v > SF_TARGET).length };
   });
   const max = rows.reduce((m, r) => Math.max(m, r.total), 0);
   rows.forEach(r => { r.winner = rows.length > 0 && r.total === max; });
@@ -215,20 +220,20 @@ function sfApplyOp(op, user) {
       break;
     }
     case 'sfRemovePlayer': { const b = s.players.length; s.players = s.players.filter(p => p.id !== Number(op.id)); if (s.players.length === b) return null; break; }
-    case 'sfAddRound': if (s.rounds >= SF_ROUNDS_MAX || !sfComplete(s)) return null; // neue Runde erst, wenn alle 4 Würfe aller Runden eingetragen sind s.rounds++; s.players.forEach(p => { p.throws = sfNormThrows(p.throws, s.rounds); }); break;
+    case 'sfAddRound': if (s.rounds >= SF_ROUNDS_MAX) return null; s.rounds++; s.players.forEach(p => { p.throws = sfNormThrows(p.throws, s.rounds); }); break;
     case 'sfRemoveRound': if (s.rounds <= 1) return null; s.rounds--; s.players.forEach(p => { p.throws = sfNormThrows(p.throws, s.rounds); }); break;
     case 'sfSetThrow': {
       const p = sfPlayer(op.id); if (!p) return null;
-      const r = Number(op.round), i = Number(op.idx);
-      if (!Number.isInteger(r) || r < 0 || r >= s.rounds || !Number.isInteger(i) || i < 0 || i >= SF_THROWS) return null;
-      p.throws[r][i] = sfThrow(op.value);
+      const r = Number(op.round);
+      if (!Number.isInteger(r) || r < 0 || r >= s.rounds) return null;
+      p.throws[r] = sfThrow(op.value);
       break;
     }
     case 'sfReset': if (!canManage(user.role)) return null; s.players = []; s.seq = 0; s.rounds = 1; break;
     case 'sfClose': {
       if (!sfComplete(s)) return null;
       const snap = { id: ++db.seqSf, savedAt: Date.now(), savedBy: user.username, event: s.event, date: s.date || todayStr(), disc: s.disc, rounds: s.rounds,
-        players: s.players.map(p => ({ rosterId: p.rosterId, name: p.name, throws: p.throws.map(r => r.slice()) })) };
+        players: s.players.map(p => ({ rosterId: p.rosterId, name: p.name, throws: p.throws.slice() })) };
       db.sfArchive.push(snap);
       const ev = sfEval(snap);
       db.sf = sfEmpty(s.disc);
@@ -238,7 +243,7 @@ function sfApplyOp(op, user) {
     default: return null;
   }
   // Einfache, robuste Synchronisation: nach jeder Änderung den kompletten 17+4-Zustand senden
-  return { type: 'sfState', sf: s, sub: op.type, id: op.id != null ? Number(op.id) : undefined, round: op.round, idx: op.idx, value: op.type === 'sfSetThrow' ? sfPlayer(op.id).throws[op.round][op.idx] : undefined, disc: op.disc, field: op.field };
+  return { type: 'sfState', sf: s, sub: op.type, id: op.id != null ? Number(op.id) : undefined, round: op.round, value: op.type === 'sfSetThrow' ? sfPlayer(op.id).throws[op.round] : undefined, disc: op.disc, field: op.field };
 }
 function sfDescribe(op, ctx) {
   const nm = id => { const p = db.sf.players.find(x => x.id === id); return p ? p.name : (ctx.name || '#' + id); };
@@ -251,7 +256,7 @@ function sfDescribe(op, ctx) {
     case 'sfRemovePlayer': return '17+4: Spieler entfernt (' + (ctx.name || '') + ')';
     case 'sfAddRound': return '17+4: Runde ' + op.sf.rounds + ' hinzugefügt';
     case 'sfRemoveRound': return '17+4: letzte Runde entfernt';
-    case 'sfSetThrow': return '17+4: ' + nm(op.id) + ' R' + (op.round + 1) + ' W' + (op.idx + 1) + ' = ' + (op.value == null ? '–' : op.value);
+    case 'sfSetThrow': return '17+4: ' + nm(op.id) + ' Runde ' + (op.round + 1) + ' = ' + (op.value == null ? '–' : op.value);
     case 'sfReset': return '17+4: Liste geleert';
     default: return '17+4';
   }
@@ -1801,9 +1806,6 @@ function handle(req, res) {
       }
       if (body.op.type === 'saveGame' && me.role !== 'admin' && throwsUnequal(db.sheet)) {
         return send(res, 422, { error: 'Ungleiche Wurf-Anzahl – nur ein Admin kann ein solches Spiel speichern.' });
-      }
-      if (body.op.type === 'sfAddRound' && !sfComplete(db.sf)) {
-        return send(res, 422, { error: '17+4: Erst alle 4 Würfe jeder Runde eintragen.' });
       }
       if (body.op.type === 'sfClose' && !sfComplete(db.sf)) {
         return send(res, 422, { error: '17+4: Bitte zuerst alle Felder ausfüllen.' });
