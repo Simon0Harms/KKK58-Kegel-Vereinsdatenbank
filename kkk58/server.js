@@ -101,7 +101,7 @@ function emptySheet() {
   return { event: '', date: '', placeId: null, bahnen: ['bohle'], lanes: { bohle: true, schere: false }, priceNK: 1, pricePump: 0.1,
     pumpen: '', note: '', seq: 0, players: [], updatedBy: '', updatedAt: 0 };
 }
-let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, places: [], seqPlaces: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, develop: [], seqDevelop: 0, events: [], seqEvents: 0, polls: [], seqPolls: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, lastBahnen: null, version: 0 };
+let db = { users: [], seqUser: 0, roster: [], seqRoster: 0, places: [], seqPlaces: 0, sheet: emptySheet(), archive: [], seqArchive: 0, prizes: [], seqPrizes: 0, trips: [], seqTrips: 0, develop: [], seqDevelop: 0, events: [], seqEvents: 0, polls: [], seqPolls: 0, log: [], invites: [], magic: [], ledger: [], seqLedger: 0, cashSettings: { duesCent: 2000, absenceCent: 100, expenseCent: 3500, duesStartMonth: null }, lastBahnen: null, sf: null, sfArchive: [], seqSf: 0, version: 0 };
 const LOG_MAX = 400;
 
 // ---------- Kegelorte (Spielorte) ----------
@@ -143,6 +143,120 @@ function migrateRow(p, bahnen) {
   delete p.b1; delete p.b2; delete p.s1; delete p.s2;
   return p;
 }
+// ---------- Zusatz-Spielmodus 17+4 ----------
+// Eigenständige Liste neben der Anschreibliste. Je Runde 4 Würfe (je 0–9 Holz);
+// Ziel ist 21. Rundenwert = Summe der 4 Würfe, bei mehr als 21 ("überworfen") 0 Punkte.
+// Beliebig viele Runden. Beim Abschließen (nur wenn alle Felder ausgefüllt sind) werden
+// alle Rundenpunkte addiert; die meisten Punkte gewinnen (Gleichstand = mehrere Sieger).
+// Disziplin: egal | bohle | schere. Abgeschlossene Spiele landen in db.sfArchive (eigene Statistik).
+const SF_DISCS = ['egal', 'bohle', 'schere'];
+const SF_THROWS = 4, SF_TARGET = 21, SF_THROW_MAX = 9, SF_ROUNDS_MAX = 30;
+function sfEmpty(disc) { return { event: '', date: '', disc: SF_DISCS.includes(disc) ? disc : 'egal', rounds: 1, seq: 0, players: [] }; }
+function sfThrow(v) { if (v == null || v === '') return null; return cint(v, 0, SF_THROW_MAX, 0); }
+function sfNormThrows(t, rounds) {
+  const out = [];
+  for (let r = 0; r < rounds; r++) { const row = (Array.isArray(t) && Array.isArray(t[r])) ? t[r] : []; const o = []; for (let i = 0; i < SF_THROWS; i++) o.push(sfThrow(row[i])); out.push(o); }
+  return out;
+}
+function sfNormSheet(src) {
+  const s = Object.assign(sfEmpty(), src || {});
+  s.disc = SF_DISCS.includes(s.disc) ? s.disc : 'egal';
+  s.rounds = cint(s.rounds, 1, SF_ROUNDS_MAX, 1);
+  s.event = String(s.event || '').slice(0, 120); s.date = String(s.date || '').slice(0, 120);
+  s.players = Array.isArray(s.players) ? s.players.map(p => ({ id: Number(p.id), rosterId: p.rosterId != null ? Number(p.rosterId) : null, name: String(p.name || '').slice(0, 60), throws: sfNormThrows(p.throws, s.rounds) })) : [];
+  s.seq = cint(s.seq, 0, 1e9, s.players.reduce((m, p) => Math.max(m, p.id), 0));
+  return s;
+}
+function sfRoundScore(row) { const sum = sumVals(row); return sum > SF_TARGET ? 0 : sum; }
+function sfComplete(s) { return s.players.length > 0 && s.players.every(p => p.throws.every(r => r.every(v => v != null))); }
+// Auswertung eines (Live- oder archivierten) 17+4-Spiels
+function sfEval(g) {
+  const rows = (g.players || []).map(p => {
+    const rs = (p.throws || []).map(sfRoundScore);
+    return { rosterId: p.rosterId != null ? p.rosterId : null, name: p.name, throws: p.throws, roundScores: rs, total: sumVals(rs),
+      hits: (p.throws || []).filter(r => sumVals(r) === SF_TARGET).length, busts: (p.throws || []).filter(r => sumVals(r) > SF_TARGET).length };
+  });
+  const max = rows.reduce((m, r) => Math.max(m, r.total), 0);
+  rows.forEach(r => { r.winner = rows.length > 0 && r.total === max; });
+  return { rows, max, winners: rows.filter(r => r.winner).map(r => r.name) };
+}
+function sfDiscLabel(d) { return d === 'bohle' ? 'Bohle' : d === 'schere' ? 'Schere' : 'egal'; }
+function sfStats(disc, year) {
+  const games = db.sfArchive.filter(g => (!disc || g.disc === disc) && (year == null || gameYear(g) === year));
+  const per = new Map();
+  for (const g of games) {
+    const ev = sfEval(g);
+    for (const r of ev.rows) {
+      const key = r.rosterId != null ? 'r' + r.rosterId : 'n' + r.name.toLowerCase();
+      let o = per.get(key);
+      if (!o) { const rp = r.rosterId != null ? db.roster.find(x => x.id === r.rosterId) : null; o = { rosterId: r.rosterId, name: rp ? rp.name : r.name, games: 0, wins: 0, rounds: 0, points: 0, hits: 0, busts: 0, best: 0 }; per.set(key, o); }
+      o.games++; if (r.winner) o.wins++; o.rounds += r.roundScores.length; o.points += r.total; o.hits += r.hits; o.busts += r.busts; o.best = Math.max(o.best, r.total);
+    }
+  }
+  const players = Array.from(per.values()).map(o => Object.assign(o, { avgRound: o.rounds ? Math.round(o.points / o.rounds * 100) / 100 : 0 }))
+    .sort((a, b) => b.wins - a.wins || b.avgRound - a.avgRound || a.name.localeCompare(b.name));
+  const years = Array.from(new Set(db.sfArchive.map(gameYear))).sort((a, b) => b - a);
+  return { disc: disc || null, year, years, games: games.length, players };
+}
+function sfArchiveMeta(g) { const ev = sfEval(g); return { id: g.id, date: g.date, event: g.event, disc: g.disc, rounds: g.rounds, savedAt: g.savedAt, savedBy: g.savedBy, players: ev.rows.length, winners: ev.winners, max: ev.max }; }
+function sfPlayer(id) { return db.sf.players.find(p => p.id === Number(id)); }
+function sfApplyOp(op, user) {
+  const s = db.sf;
+  switch (op.type) {
+    case 'sfSetMeta': if (!['event', 'date'].includes(op.field)) return null; s[op.field] = String(op.value || '').slice(0, 120); break;
+    case 'sfSetDisc': if (!SF_DISCS.includes(op.disc)) return null; s.disc = op.disc; break;
+    case 'sfAddPlayer': {
+      let person = null;
+      if (op.rosterId != null) person = db.roster.find(r => r.id === Number(op.rosterId));
+      else { const nm = String(op.name || '').trim(); if (!nm) return null; person = db.roster.find(r => r.name.toLowerCase() === nm.toLowerCase()); }
+      if (!person) return null;
+      if (s.players.some(p => p.rosterId === person.id)) return null; // jede Person nur einmal
+      s.players.push({ id: ++s.seq, rosterId: person.id, name: person.name, throws: sfNormThrows([], s.rounds) });
+      break;
+    }
+    case 'sfRemovePlayer': { const b = s.players.length; s.players = s.players.filter(p => p.id !== Number(op.id)); if (s.players.length === b) return null; break; }
+    case 'sfAddRound': if (s.rounds >= SF_ROUNDS_MAX) return null; s.rounds++; s.players.forEach(p => { p.throws = sfNormThrows(p.throws, s.rounds); }); break;
+    case 'sfRemoveRound': if (s.rounds <= 1) return null; s.rounds--; s.players.forEach(p => { p.throws = sfNormThrows(p.throws, s.rounds); }); break;
+    case 'sfSetThrow': {
+      const p = sfPlayer(op.id); if (!p) return null;
+      const r = Number(op.round), i = Number(op.idx);
+      if (!Number.isInteger(r) || r < 0 || r >= s.rounds || !Number.isInteger(i) || i < 0 || i >= SF_THROWS) return null;
+      p.throws[r][i] = sfThrow(op.value);
+      break;
+    }
+    case 'sfReset': if (!canManage(user.role)) return null; s.players = []; s.seq = 0; s.rounds = 1; break;
+    case 'sfClose': {
+      if (!sfComplete(s)) return null;
+      const snap = { id: ++db.seqSf, savedAt: Date.now(), savedBy: user.username, event: s.event, date: s.date || todayStr(), disc: s.disc, rounds: s.rounds,
+        players: s.players.map(p => ({ rosterId: p.rosterId, name: p.name, throws: p.throws.map(r => r.slice()) })) };
+      db.sfArchive.push(snap);
+      const ev = sfEval(snap);
+      db.sf = sfEmpty(s.disc);
+      return { type: 'sfClosed', sf: db.sf, archiveId: snap.id, winners: ev.winners, max: ev.max, date: snap.date };
+    }
+    case 'sfDeleteGame': { if (!canManage(user.role)) return null; const b = db.sfArchive.length; db.sfArchive = db.sfArchive.filter(g => g.id !== Number(op.id)); if (db.sfArchive.length === b) return null; return { type: 'sfArchiveChanged', id: Number(op.id), removed: true }; }
+    default: return null;
+  }
+  // Einfache, robuste Synchronisation: nach jeder Änderung den kompletten 17+4-Zustand senden
+  return { type: 'sfState', sf: s, sub: op.type, id: op.id != null ? Number(op.id) : undefined, round: op.round, idx: op.idx, value: op.type === 'sfSetThrow' ? sfPlayer(op.id).throws[op.round][op.idx] : undefined, disc: op.disc, field: op.field };
+}
+function sfDescribe(op, ctx) {
+  const nm = id => { const p = db.sf.players.find(x => x.id === id); return p ? p.name : (ctx.name || '#' + id); };
+  if (op.type === 'sfClosed') return '17+4 abgeschlossen (' + fmtD(op.date) + ') – Sieger: ' + (op.winners.join(', ') || '–') + ' mit ' + op.max + ' Punkten';
+  if (op.type === 'sfArchiveChanged') return '17+4: Spiel aus dem Archiv gelöscht';
+  switch (op.sub) {
+    case 'sfSetMeta': return '17+4: ' + (op.field === 'event' ? 'Anlass' : 'Datum') + ' gesetzt';
+    case 'sfSetDisc': return '17+4: Disziplin ' + sfDiscLabel(op.disc);
+    case 'sfAddPlayer': return '17+4: Spieler hinzugefügt (' + (op.sf.players.length ? op.sf.players[op.sf.players.length - 1].name : '') + ')';
+    case 'sfRemovePlayer': return '17+4: Spieler entfernt (' + (ctx.name || '') + ')';
+    case 'sfAddRound': return '17+4: Runde ' + op.sf.rounds + ' hinzugefügt';
+    case 'sfRemoveRound': return '17+4: letzte Runde entfernt';
+    case 'sfSetThrow': return '17+4: ' + nm(op.id) + ' R' + (op.round + 1) + ' W' + (op.idx + 1) + ' = ' + (op.value == null ? '–' : op.value);
+    case 'sfReset': return '17+4: Liste geleert';
+    default: return '17+4';
+  }
+}
+db.sf = sfEmpty();
 // ---------- Mitgliedsverzeichnis: Kontaktfelder ----------
 // Zusatzangaben je Stamm-Person (Verzeichnis). Freitext mit Längenbegrenzung;
 // geburtsdatum als YYYY-MM-DD oder null. Werte werden mit dem Stamm live synchronisiert.
@@ -386,6 +500,9 @@ function loadDb() {
     const cs = j.cashSettings || {};
     db.cashSettings = { duesCent: Number.isFinite(cs.duesCent) ? cs.duesCent : 2000, absenceCent: Number.isFinite(cs.absenceCent) ? cs.absenceCent : 100, expenseCent: Number.isFinite(cs.expenseCent) ? cs.expenseCent : 3500, duesStartMonth: /^\d{4}-\d{2}$/.test(cs.duesStartMonth) ? cs.duesStartMonth : null };
     db.lastBahnen = Array.isArray(j.lastBahnen) ? normBahnen(j.lastBahnen) : null;
+    db.sf = sfNormSheet(j.sf);
+    db.sfArchive = Array.isArray(j.sfArchive) ? j.sfArchive.filter(g => g && g.id != null).map(g => Object.assign({}, g, { disc: SF_DISCS.includes(g.disc) ? g.disc : 'egal', players: (g.players || []).map(p => ({ rosterId: p.rosterId != null ? Number(p.rosterId) : null, name: String(p.name || ''), throws: sfNormThrows(p.throws, cint(g.rounds, 1, SF_ROUNDS_MAX, 1)) })) })) : [];
+    db.seqSf = j.seqSf || db.sfArchive.reduce((m, g) => Math.max(m, g.id), 0);
     db.version = j.version || 0;
   } catch (_) { /* Erststart */ seedPrizes(); seedTrips(); seedDevelop(); }
 }
@@ -733,6 +850,7 @@ function captureCtx(op) {
   const pick = (arr) => (arr || []).find(x => x.id === id) || null;
   switch (op.type) {
     case 'removePlayer': { const rp = s.players.find(p => p.id === op.id); c.removedName = rp ? rp.name : ''; break; }
+    case 'sfRemovePlayer': { const rp = db.sf.players.find(p => p.id === id); c.name = rp ? rp.name : ''; break; }
     case 'setName': { const rp = s.players.find(p => p.id === op.id); c.oldName = rp ? rp.name : ''; break; }
     case 'setMeta': c.old = s[op.field]; break;
     case 'setPlace': c.oldPlace = placeNameById(s.placeId); break;
@@ -810,6 +928,7 @@ function describeOp(op, ctx) {
     case 'votePoll': return 'Abgestimmt: ' + (op.poll ? quoteDe(op.poll.question) : '') + ' (' + (op.choice === 'yes' ? 'Ja' : 'Nein') + ')';
     case 'closePoll': return 'Abstimmung beendet: ' + (op.poll ? quoteDe(op.poll.question) : '');
     case 'removePoll': return 'Abstimmung gelöscht: ' + (ctx.name ? quoteDe(ctx.name) : '');
+    case 'sfState': case 'sfClosed': case 'sfArchiveChanged': return sfDescribe(op, ctx);
     default: return op.type;
   }
 }
@@ -1197,6 +1316,7 @@ function throwCount(p, bahnen) { let n = 0; const ds = discScores(p, bahnen); ds
 function throwsUnequal(s) { if (!s.players || s.players.length < 2) return false; const bn = resolveBahnen(s); return new Set(s.players.map(p => throwCount(p, bn))).size > 1; }
 function applyOp(op, user) {
   const s = db.sheet;
+  if (op && typeof op.type === 'string' && op.type.startsWith('sf')) return sfApplyOp(op, user);
   switch (op && op.type) {
     case 'setMeta': if (!['event', 'date'].includes(op.field)) return null; s[op.field] = String(op.value || '').slice(0, 120); return { type: 'setMeta', field: op.field, value: s[op.field] };
     case 'setPlace': { if (op.value == null || op.value === '') { s.placeId = null; return { type: 'setPlace', value: null }; } const pl = placeById(op.value); if (!pl) return null; s.placeId = pl.id; return { type: 'setPlace', value: pl.id }; }
@@ -1636,7 +1756,7 @@ function handle(req, res) {
     });
   }
   if (api === '/logout' && req.method === 'POST') { clearSessionCookie(res); return send(res, 200, { ok: true }); }
-  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, places: db.places, lastBahnen: db.lastBahnen, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView), matrixRoom: publicMatrixRoom(), me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
+  if (api === '/state' && req.method === 'GET') return send(res, 200, { version: db.version, sheet: db.sheet, roster: db.roster, places: db.places, lastBahnen: db.lastBahnen, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView), sf: db.sf, matrixRoom: publicMatrixRoom(), me: { id: me.id, username: me.username, role: me.role, mustChangePassword: !!me.mustChangePassword, matrix: matrixInfo(me) } });
   if (api === '/roster' && req.method === 'GET') return send(res, 200, { roster: db.roster });
   if (api === '/archive' && req.method === 'GET') return send(res, 200, { archive: db.archive.slice().sort(byGameDesc).map(archiveMeta) });
   if (api === '/export' && req.method === 'GET') {
@@ -1659,10 +1779,16 @@ function handle(req, res) {
   if (mA && req.method === 'GET') { const g = db.archive.find(a => a.id === Number(mA[1])); if (!g) return send(res, 404, { error: 'nicht gefunden' }); return send(res, 200, { game: { id: g.id, event: g.event, date: g.date, place: g.placeName || placeNameById(g.placeId) || '', savedAt: g.savedAt, savedBy: g.savedBy, pumpen: g.pumpen, note: g.note }, eval: evalGame(g) }); }
   if (api === '/stats' && req.method === 'GET') { const yq = u.searchParams.get('year'); const yr = /^\d{4}$/.test(String(yq || '')) ? Number(yq) : null; const pq = u.searchParams.get('place'); const pl = (pq === 'none') ? 'none' : (/^\d+$/.test(String(pq || '')) ? Number(pq) : null); return send(res, 200, computeStats(yr, pl)); }
 
+  // ----- 17+4: Archiv & Statistik -----
+  if (api === '/sf/archive' && req.method === 'GET') return send(res, 200, { archive: db.sfArchive.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)) || b.id - a.id).map(sfArchiveMeta) });
+  const mSf = api.match(/^\/sf\/archive\/(\d+)$/);
+  if (mSf && req.method === 'GET') { const g = db.sfArchive.find(x => x.id === Number(mSf[1])); if (!g) return send(res, 404, { error: 'nicht gefunden' }); return send(res, 200, { game: sfArchiveMeta(g), eval: sfEval(g) }); }
+  if (api === '/sf/stats' && req.method === 'GET') { const dq = u.searchParams.get('disc'); const yq = u.searchParams.get('year'); return send(res, 200, sfStats(SF_DISCS.includes(dq) ? dq : null, /^\d{4}$/.test(String(yq || '')) ? Number(yq) : null)); }
+
   if (api === '/events' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.write('retry: 3000\n\n');
-    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, places: db.places, lastBahnen: db.lastBahnen, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView) }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ type: 'sync', v: db.version, sheet: db.sheet, roster: db.roster, places: db.places, lastBahnen: db.lastBahnen, prizes: db.prizes, trips: db.trips, develop: db.develop, events: db.events, polls: db.polls.map(pollView), sf: db.sf }) + '\n\n');
     const c = { res, uid: me.id }; clients.add(c); req.on('close', () => clients.delete(c)); return;
   }
 
@@ -1675,6 +1801,9 @@ function handle(req, res) {
       }
       if (body.op.type === 'saveGame' && me.role !== 'admin' && throwsUnequal(db.sheet)) {
         return send(res, 422, { error: 'Ungleiche Wurf-Anzahl – nur ein Admin kann ein solches Spiel speichern.' });
+      }
+      if (body.op.type === 'sfClose' && !sfComplete(db.sf)) {
+        return send(res, 422, { error: '17+4: Bitte zuerst alle Felder ausfüllen.' });
       }
       const ctx = captureCtx(body.op);
       const norm = applyOp(body.op, me);

@@ -323,6 +323,22 @@
   .prizesec .ptext{white-space:pre-wrap;line-height:1.5}
   .prizeadmin{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
   .prizeempty{color:var(--muted);padding:18px 4px;text-align:center}
+  /* ----- 17+4 ----- */
+  .sfbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+  .sfbar input[type=text],.sfbar input[type=date],.sfbar select{padding:7px 9px;border:1px solid var(--line-strong);border-radius:8px;font-size:.9rem;background:var(--card);color:var(--ink)}
+  .sftable{border-collapse:collapse;width:100%}
+  .sftable th,.sftable td{border-bottom:1px solid var(--line);padding:4px 5px;text-align:center;font-size:.88rem;white-space:nowrap}
+  .sftable th{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .sftable th.rh{border-left:2px solid var(--line-strong)}
+  .sftable td.nm{text-align:left;font-weight:700}
+  .sftable td.rs{font-weight:800;border-right:2px solid var(--line-strong);min-width:30px}
+  .sftable td.rs.hit{color:#1f7a4d} .sftable td.rs.bust{color:var(--danger);text-decoration:line-through}
+  .sftable td.tot{font-weight:900;font-size:1rem}
+  .sftable tr.win td.nm::after{content:" 🏆"}
+  .sftable input.sfw{width:34px;padding:5px 2px;text-align:center;border:1px solid var(--line-strong);border-radius:6px;font-size:.95rem;font-variant-numeric:tabular-nums}
+  .sftable input.sfw.empty{background:#fff7e0}
+  .sfhint{color:var(--muted);font-size:.84rem;margin:6px 0}
+  .sfh3{margin:18px 0 8px;font-size:1.05rem;color:var(--pine-dark)}
   .triptable{width:100%;border-collapse:collapse}
   .triptable th,.triptable td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);font-size:.9rem;vertical-align:top}
   .triptable th{background:var(--card);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);position:sticky;top:0}
@@ -591,6 +607,7 @@
     </div>
     <div class="nav">
       <button id="nav_sheet" class="active" type="button">Anschreiben</button>
+      <button id="nav_sf" type="button">17+4</button>
       <button id="nav_archive" type="button">Archiv</button>
       <button id="nav_stats" type="button">Statistik</button>
       <button id="nav_dir" type="button">Verzeichnis</button>
@@ -704,6 +721,43 @@
     </details>
 
     <p class="foot" id="foot"></p>
+  </section>
+
+  <!-- ===== 17+4 ===== -->
+  <section id="view_sf" class="hidden">
+    <div class="sfbar">
+      <input type="date" id="sf_date" title="Datum">
+      <input type="text" id="sf_event" placeholder="Anlass (optional)" maxlength="120">
+      <span class="sortlbl">Disziplin:</span>
+      <div class="seg" id="sf_disc">
+        <button type="button" data-sfd="egal">egal</button>
+        <button type="button" data-sfd="bohle">Bohle</button>
+        <button type="button" data-sfd="schere">Schere</button>
+      </div>
+    </div>
+    <div class="sfbar">
+      <select id="sf_addsel"><option value="">Spieler hinzufügen …</option></select>
+      <button class="btn sm" id="sf_add" type="button">+ Spieler</button>
+      <button class="btn ghost sm" id="sf_addround" type="button">+ Runde</button>
+      <button class="btn ghost sm" id="sf_delround" type="button">− letzte Runde</button>
+      <button class="btn sm" id="sf_close" type="button">✔ Spiel abschließen</button>
+      <button class="btn warn sm hidden" id="sf_reset" type="button">Liste leeren</button>
+    </div>
+    <p class="sfhint">Je Runde 4 Würfe (0–9). Ziel: 21 – wer mehr wirft, bekommt für die Runde 0 Punkte. Abschließen geht erst, wenn alle Felder ausgefüllt sind; die meisten Punkte über alle Runden gewinnen.</p>
+    <div class="tablewrap"><table class="sftable"><thead id="sf_thead"></thead><tbody id="sf_tbody"></tbody></table></div>
+    <h3 class="sfh3">Statistik 17+4</h3>
+    <div class="sfbar">
+      <div class="seg" id="sf_statdisc">
+        <button type="button" data-sfs="">alle</button>
+        <button type="button" data-sfs="egal">egal</button>
+        <button type="button" data-sfs="bohle">Bohle</button>
+        <button type="button" data-sfs="schere">Schere</button>
+      </div>
+      <select id="sf_statyear"><option value="">alle Jahre</option></select>
+    </div>
+    <div id="sf_stats"></div>
+    <h3 class="sfh3">Archiv 17+4</h3>
+    <div id="sf_archive"></div>
   </section>
 
   <!-- ===== ARCHIV ===== -->
@@ -1223,7 +1277,7 @@
   $("pw_new2").addEventListener("keydown",e=>{if(e.key==='Enter')submitPw();});
 
   async function loadState(){ const r=await api('/state');
-    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; places=r.data.places||[]; lastBahnen=r.data.lastBahnen||null; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; events=r.data.events||[]; polls=r.data.polls||[]; version=r.data.version; me=r.data.me||me; matrixRoom=r.data.matrixRoom||null; pending.clear(); rebuildDatalist(); renderPlaceSelect(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog();
+    if(r.ok){ state=r.data.sheet; roster=r.data.roster||[]; places=r.data.places||[]; lastBahnen=r.data.lastBahnen||null; prizes=r.data.prizes||[]; trips=r.data.trips||[]; develop=r.data.develop||[]; events=r.data.events||[]; polls=r.data.polls||[]; version=r.data.version; sf=r.data.sf||sf; me=r.data.me||me; matrixRoom=r.data.matrixRoom||null; pending.clear(); rebuildDatalist(); renderPlaceSelect(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); renderSf(); loadLog();
       if(me&&me.mustChangePassword&&$("pwdlg").classList.contains("hidden")) openPwDialog(); }
     else if(r.status===401) showLogin(); }
   function resync(){ loadState(); }
@@ -1232,6 +1286,7 @@
   function setView(v){ currentView=v;
     if(v!=="sheet" && document.body.classList.contains("focus")) setFocus(false);
     $("view_sheet").classList.toggle("hidden",v!=="sheet");
+    $("view_sf").classList.toggle("hidden",v!=="sf");
     $("view_archive").classList.toggle("hidden",v!=="archive");
     $("view_stats").classList.toggle("hidden",v!=="stats");
     $("view_cash").classList.toggle("hidden",v!=="cash");
@@ -1244,6 +1299,7 @@
     $("view_matrix").classList.toggle("hidden",v!=="matrix");
     $("sheetBtns").style.display = v==="sheet" ? "" : "none";
     $("nav_sheet").classList.toggle("active",v==="sheet");
+    $("nav_sf").classList.toggle("active",v==="sf");
     $("nav_archive").classList.toggle("active",v==="archive");
     $("nav_stats").classList.toggle("active",v==="stats");
     $("nav_cash").classList.toggle("active",v==="cash");
@@ -1254,6 +1310,7 @@
     $("nav_cal").classList.toggle("active",v==="cal");
     $("nav_polls").classList.toggle("active",v==="polls");
     $("nav_matrix").classList.toggle("active",v==="matrix");
+    if(v==="sf"){ renderSf(); loadSfData(); }
     if(v==="archive") loadArchive();
     if(v==="stats") loadStats();
     if(v==="cash") loadCash();
@@ -1269,6 +1326,7 @@
   function updateFocusMeta(){ const ev=($("f_event").value||"").trim(), dt=$("f_date").value||""; const pl=(state&&state.placeId!=null)?((places.find(p=>p.id===state.placeId)||{}).name||""):""; $("fbMeta").textContent=[ev,dt,pl].filter(Boolean).join(" · "); }
   function setFocus(on){ document.body.classList.toggle("focus",!!on); if(on)updateFocusMeta(); try{localStorage.setItem("kkk58_focus",on?"1":"0");}catch(_){} }
   $("nav_sheet").addEventListener("click",()=>setView("sheet"));
+  $("nav_sf").addEventListener("click",()=>setView("sf"));
   $("nav_archive").addEventListener("click",()=>setView("archive"));
   $("nav_stats").addEventListener("click",()=>setView("stats"));
   $("nav_cash").addEventListener("click",()=>setView("cash"));
@@ -1297,7 +1355,7 @@
     es.onopen=()=>$("conn").classList.remove("off");
     es.onerror=()=>$("conn").classList.add("off");
     es.onmessage=ev=>{ let m; try{m=JSON.parse(ev.data);}catch(_){return;}
-      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; places=m.places||places; lastBahnen=m.lastBahnen||lastBahnen; prizes=m.prizes||prizes; trips=m.trips||trips; develop=m.develop||develop; events=m.events||events; polls=m.polls||polls; version=m.v; pending.clear(); rebuildDatalist(); renderPlaceSelect(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); loadLog(); return; }
+      if(m.type==='sync'){ state=m.sheet; roster=m.roster||roster; places=m.places||places; lastBahnen=m.lastBahnen||lastBahnen; prizes=m.prizes||prizes; trips=m.trips||trips; develop=m.develop||develop; events=m.events||events; polls=m.polls||polls; version=m.v; sf=m.sf||sf; pending.clear(); rebuildDatalist(); renderPlaceSelect(); renderAll(); renderRosterAdmin(); renderDirectory(); renderPrizes(); renderTrips(); renderDevelop(); renderCal(); renderPolls(); renderSf(); loadLog(); return; }
       applyRemote(m); }; }
   function applyRemote(m){
     if(typeof m.v!=='number')return;
@@ -1353,6 +1411,9 @@
       case 'removeEvent': events=events.filter(e=>e.id!==op.id); renderCal(); renderPlaceSuggest(); return;
       case 'addPoll': case 'votePoll': case 'closePoll': { if(op.poll){ const i=polls.findIndex(p=>p.id===op.poll.id); if(i>=0)polls[i]=op.poll; else polls.push(op.poll); } renderPolls(); return; }
       case 'removePoll': polls=polls.filter(p=>p.id!==op.id); renderPolls(); return;
+      case 'sfState': sf=op.sf; renderSf(); return;
+      case 'sfClosed': sf=op.sf; sfLastKey=null; renderSf(); toast('17+4 beendet – Sieger: '+(op.winners||[]).join(', ')+' ('+op.max+')'); if(currentView==='sf')loadSfData(); return;
+      case 'sfArchiveChanged': if(currentView==='sf')loadSfData(); return;
     }
     updateDerived();
   }
@@ -2461,6 +2522,105 @@
 
   // ---------- Statistik ----------
   let statsData=null, statsRankMode='avg', statsYear=null, statsPlace=null;
+  // ---------- 17+4 ----------
+  const SF_TARGET=21, SF_THROWS=4;
+  let sf=null, sfStatDisc="", sfStatYear="";
+  const sfDiscLabel=d=>d==="bohle"?"Bohle":d==="schere"?"Schere":"egal";
+  const sfSum=a=>a.reduce((x,v)=>x+(v||0),0);
+  const sfRoundScore=r=>{ const s=sfSum(r); return s>SF_TARGET?0:s; };
+  const sfTotal=p=>p.throws.reduce((x,r)=>x+sfRoundScore(r),0);
+  function sfComplete(){ return !!sf && sf.players.length>0 && sf.players.every(p=>p.throws.every(r=>r.every(v=>v!=null))); }
+  function sfStructKey(){ return sf? (sf.rounds+"|"+sf.players.map(p=>p.id).join(",")) : ""; }
+  let sfLastKey=null;
+  function renderSf(){ if(!sf||!$("sf_tbody"))return;
+    const manage=!!(me&&effManage());
+    $("sf_reset").classList.toggle("hidden",!manage);
+    const di=$("sf_date"), ev=$("sf_event");
+    if(di!==document.activeElement) di.value=sf.date||""; if(ev!==document.activeElement) ev.value=sf.event||"";
+    $("sf_disc").querySelectorAll("button").forEach(b=>b.classList.toggle("active",b.dataset.sfd===sf.disc));
+    // Auswahl: aktive Stamm-Personen, die noch nicht mitspielen
+    const sel=$("sf_addsel"), used=new Set(sf.players.map(p=>p.rosterId)), cur=sel.value;
+    sel.innerHTML='<option value="">Spieler hinzufügen …</option>'+roster.filter(r=>r.active!==false&&!used.has(r.id)).sort((a,b)=>a.name.localeCompare(b.name)).map(r=>'<option value="'+r.id+'">'+esc(r.name)+'</option>').join("");
+    if([...sel.options].some(o=>o.value===cur)) sel.value=cur;
+    $("sf_delround").disabled=sf.rounds<=1;
+    $("sf_close").disabled=!sfComplete();
+    const key=sfStructKey();
+    if(key!==sfLastKey){ sfLastKey=key; sfBuildTable(); } else sfUpdateTable();
+  }
+  function sfBuildTable(){
+    let h='<tr><th rowspan="2">Spieler</th>';
+    for(let r=0;r<sf.rounds;r++) h+='<th class="rh" colspan="'+(SF_THROWS+1)+'">Runde '+(r+1)+'</th>';
+    h+='<th rowspan="2">Gesamt</th><th rowspan="2"></th></tr><tr>';
+    for(let r=0;r<sf.rounds;r++){ for(let i=0;i<SF_THROWS;i++) h+='<th'+(i===0?' class="rh"':'')+'>'+(i+1)+'</th>'; h+='<th>Σ</th>'; }
+    $("sf_thead").innerHTML=h+'</tr>';
+    let b='';
+    if(!sf.players.length) b='<tr><td colspan="'+(sf.rounds*(SF_THROWS+1)+3)+'" class="sfhint">Noch keine Spieler.</td></tr>';
+    sf.players.forEach(p=>{
+      b+='<tr data-sfp="'+p.id+'"><td class="nm">'+esc(p.name)+'</td>';
+      for(let r=0;r<sf.rounds;r++){ for(let i=0;i<SF_THROWS;i++) b+='<td><input class="sfw" inputmode="numeric" maxlength="1" data-sfp="'+p.id+'" data-r="'+r+'" data-i="'+i+'"></td>'; b+='<td class="rs" data-sfrs="'+p.id+':'+r+'"></td>'; }
+      b+='<td class="tot" data-sftot="'+p.id+'"></td><td><button class="btn ghost sm" type="button" data-sfdel="'+p.id+'" title="Spieler entfernen">✕</button></td></tr>';
+    });
+    $("sf_tbody").innerHTML=b; sfUpdateTable();
+  }
+  function sfUpdateTable(){
+    const max=sf.players.reduce((m,p)=>Math.max(m,sfTotal(p)),0), done=sfComplete();
+    sf.players.forEach(p=>{
+      p.throws.forEach((row,r)=>{
+        row.forEach((v,i)=>{ const el=q('input.sfw[data-sfp="'+p.id+'"][data-r="'+r+'"][data-i="'+i+'"]'); if(!el)return; if(el!==document.activeElement) el.value=v==null?"":v; el.classList.toggle("empty",v==null); });
+        const td=q('[data-sfrs="'+p.id+':'+r+'"]'); if(td){ const s=sfSum(row), full=row.every(v=>v!=null); td.textContent=row.some(v=>v!=null)?String(sfRoundScore(row)):""; td.classList.toggle("hit",s===SF_TARGET); td.classList.toggle("bust",s>SF_TARGET); td.title=s>SF_TARGET?("überworfen ("+s+")"):(full?"":"offen"); }
+      });
+      const t=q('[data-sftot="'+p.id+'"]'); if(t) t.textContent=sfTotal(p);
+      const tr=q('tr[data-sfp="'+p.id+'"]'); if(tr) tr.classList.toggle("win",done&&max>0&&sfTotal(p)===max);
+    });
+  }
+  function sfSetThrowFromInput(el){ const raw=String(el.value).trim(); let v=null; if(raw!==""){ const n=parseInt(raw,10); if(!isFinite(n)){ el.value=""; return; } v=Math.max(0,Math.min(9,n)); el.value=v; }
+    const p=sf.players.find(x=>x.id===Number(el.dataset.sfp)), r=Number(el.dataset.r), i=Number(el.dataset.i);
+    if(!p||p.throws[r][i]===v)return; p.throws[r][i]=v; sfUpdateTable(); $("sf_close").disabled=!sfComplete();
+    opStruct({type:'sfSetThrow',id:p.id,round:r,idx:i,value:v}); }
+  (function wireSf(){
+    const tb=$("sf_tbody"); if(!tb)return;
+    tb.addEventListener("input",e=>{ const el=e.target.closest("input.sfw"); if(!el)return; if(String(el.value).length>=1){ sfSetThrowFromInput(el); const all=[...tb.querySelectorAll("input.sfw")]; const nx=all[all.indexOf(el)+1]; if(nx){ nx.focus(); nx.select(); } } });
+    tb.addEventListener("change",e=>{ const el=e.target.closest("input.sfw"); if(el) sfSetThrowFromInput(el); });
+    tb.addEventListener("focusin",e=>{ const el=e.target.closest("input.sfw"); if(el) el.select(); });
+    tb.addEventListener("click",e=>{ const b=e.target.closest("button[data-sfdel]"); if(!b)return; const p=sf.players.find(x=>x.id===Number(b.dataset.sfdel)); if(p&&confirm(p.name+" aus der 17+4-Liste entfernen?")) opStruct({type:'sfRemovePlayer',id:p.id}); });
+    $("sf_date").addEventListener("change",e=>opStruct({type:'sfSetMeta',field:'date',value:e.target.value}));
+    $("sf_event").addEventListener("change",e=>opStruct({type:'sfSetMeta',field:'event',value:e.target.value}));
+    $("sf_disc").addEventListener("click",e=>{ const b=e.target.closest("button[data-sfd]"); if(b&&sf&&b.dataset.sfd!==sf.disc) opStruct({type:'sfSetDisc',disc:b.dataset.sfd}); });
+    $("sf_add").addEventListener("click",()=>{ const v=$("sf_addsel").value; if(!v){ toast("Bitte Spieler wählen"); return; } opStruct({type:'sfAddPlayer',rosterId:Number(v)}); $("sf_addsel").value=""; });
+    $("sf_addsel").addEventListener("change",()=>$("sf_add").click());
+    $("sf_addround").addEventListener("click",()=>opStruct({type:'sfAddRound'}));
+    $("sf_delround").addEventListener("click",()=>{ const r=sf.rounds-1; const has=sf.players.some(p=>p.throws[r].some(v=>v!=null)); if(has&&!confirm("Letzte Runde enthält Würfe – trotzdem entfernen?"))return; opStruct({type:'sfRemoveRound'}); });
+    $("sf_close").addEventListener("click",()=>{ if(!sfComplete()){ toast("Bitte zuerst alle Felder ausfüllen"); return; }
+      const max=sf.players.reduce((m,p)=>Math.max(m,sfTotal(p)),0), win=sf.players.filter(p=>sfTotal(p)===max).map(p=>p.name);
+      if(confirm("17+4 abschließen?\nSieger: "+win.join(", ")+" mit "+max+" Punkten")) opStruct({type:'sfClose'}); });
+    $("sf_reset").addEventListener("click",()=>{ if(confirm("17+4-Liste wirklich leeren?")) opStruct({type:'sfReset'}); });
+    $("sf_statdisc").addEventListener("click",e=>{ const b=e.target.closest("button[data-sfs]"); if(b){ sfStatDisc=b.dataset.sfs; loadSfData(); } });
+    $("sf_statyear").addEventListener("change",e=>{ sfStatYear=e.target.value; loadSfData(); });
+    $("sf_archive").addEventListener("click",async e=>{
+      const d=e.target.closest("button[data-sfgdel]"); if(d){ if(confirm("Dieses 17+4-Spiel endgültig löschen?")) opStruct({type:'sfDeleteGame',id:Number(d.dataset.sfgdel)}); return; }
+      const o=e.target.closest("[data-sfgopen]"); if(!o)return; const box=$("sfg_"+o.dataset.sfgopen); if(!box)return;
+      if(!box.classList.contains("hidden")){ box.classList.add("hidden"); return; }
+      const r=await api('/sf/archive/'+o.dataset.sfgopen); if(!r.ok){ toast("Fehler beim Laden"); return; } box.innerHTML=sfGameHtml(r.data.game,r.data.eval); box.classList.remove("hidden"); });
+  })();
+  function sfGameHtml(g,ev){ let h='<table class="sftable"><thead><tr><th>Spieler</th>';
+    for(let r=0;r<g.rounds;r++) h+='<th class="rh">R'+(r+1)+'</th>'; h+='<th>Gesamt</th></tr></thead><tbody>';
+    ev.rows.slice().sort((a,b)=>b.total-a.total).forEach(x=>{ h+='<tr class="'+(x.winner?'win':'')+'"><td class="nm">'+esc(x.name)+'</td>';
+      x.throws.forEach((row,r)=>{ const s=sfSum(row); h+='<td class="rh" title="'+row.join(' · ')+'"><span class="'+(s>SF_TARGET?'bust':'')+'">'+esc(row.join('·'))+'</span> = <b>'+x.roundScores[r]+'</b>'+(s>SF_TARGET?' <small>('+s+')</small>':'')+'</td>'; });
+      h+='<td class="tot">'+x.total+'</td></tr>'; });
+    return h+'</tbody></table>'; }
+  async function loadSfData(){
+    $("sf_statdisc").querySelectorAll("button").forEach(b=>b.classList.toggle("active",b.dataset.sfs===sfStatDisc));
+    const qs=new URLSearchParams(); if(sfStatDisc)qs.set("disc",sfStatDisc); if(sfStatYear)qs.set("year",sfStatYear);
+    const [st,ar]=await Promise.all([api('/sf/stats?'+qs.toString()), api('/sf/archive')]);
+    if(st.ok){ const d=st.data, ys=$("sf_statyear");
+      ys.innerHTML='<option value="">alle Jahre</option>'+(d.years||[]).map(y=>'<option value="'+y+'">'+y+'</option>').join(""); ys.value=sfStatYear;
+      if(!d.players.length) $("sf_stats").innerHTML='<p class="sfhint">Noch keine abgeschlossenen 17+4-Spiele'+(sfStatDisc?' ('+sfDiscLabel(sfStatDisc)+')':'')+'.</p>';
+      else $("sf_stats").innerHTML='<p class="sfhint">'+d.games+' Spiel'+(d.games===1?'':'e')+'</p><div class="tablewrap"><table class="triptable"><thead><tr><th>Spieler</th><th>Spiele</th><th>Siege</th><th>Runden</th><th>Punkte</th><th>Ø/Runde</th><th>21er</th><th>Überworfen</th><th>Bestes Spiel</th></tr></thead><tbody>'
+        +d.players.map(p=>'<tr><td class="tplace">'+esc(p.name)+'</td><td>'+p.games+'</td><td><b>'+p.wins+'</b></td><td>'+p.rounds+'</td><td>'+p.points+'</td><td>'+String(p.avgRound).replace(".",",")+'</td><td>'+p.hits+'</td><td>'+p.busts+'</td><td>'+p.best+'</td></tr>').join("")+'</tbody></table></div>'; }
+    if(ar.ok){ const list=ar.data.archive||[], manage=!!(me&&effManage());
+      $("sf_archive").innerHTML=!list.length?'<p class="sfhint">Noch keine Spiele im Archiv.</p>':list.map(g=>'<div class="sfgame"><div class="sfbar"><button class="btn ghost sm" type="button" data-sfgopen="'+g.id+'">'+esc(fmtLeft(g.date))+(g.event?' · '+esc(g.event):'')+' · '+sfDiscLabel(g.disc)+' · '+g.rounds+' Runde'+(g.rounds===1?'':'n')+' · 🏆 '+esc((g.winners||[]).join(", "))+' ('+g.max+')</button>'+(manage?'<button class="btn warn sm" type="button" data-sfgdel="'+g.id+'">Löschen</button>':'')+'</div><div class="tablewrap hidden" id="sfg_'+g.id+'"></div></div>').join(""); }
+  }
+
   async function loadStats(){ const box=$("statsBody");
     const qs=[]; if(statsYear!=null)qs.push('year='+statsYear); if(statsPlace!=null)qs.push('place='+encodeURIComponent(statsPlace));
     const r=await api('/stats'+(qs.length?('?'+qs.join('&')):''));
