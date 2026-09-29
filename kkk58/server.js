@@ -167,7 +167,7 @@ function sfNormSheet(src) {
   s.seq = cint(s.seq, 0, 1e9, s.players.reduce((m, p) => Math.max(m, p.id), 0));
   return s;
 }
-function sfRoundScore(row) { const sum = sumVals(row); return sum > SF_TARGET ? 0 : sum; }
+function sfRoundScore(row) { if (!row.every(v => v != null)) return 0; const sum = sumVals(row); return sum > SF_TARGET ? 0 : sum; } // zählt nur mit allen 4 Würfen
 function sfComplete(s) { return s.players.length > 0 && s.players.every(p => p.throws.every(r => r.every(v => v != null))); }
 // Auswertung eines (Live- oder archivierten) 17+4-Spiels
 function sfEval(g) {
@@ -215,7 +215,7 @@ function sfApplyOp(op, user) {
       break;
     }
     case 'sfRemovePlayer': { const b = s.players.length; s.players = s.players.filter(p => p.id !== Number(op.id)); if (s.players.length === b) return null; break; }
-    case 'sfAddRound': if (s.rounds >= SF_ROUNDS_MAX) return null; s.rounds++; s.players.forEach(p => { p.throws = sfNormThrows(p.throws, s.rounds); }); break;
+    case 'sfAddRound': if (s.rounds >= SF_ROUNDS_MAX || !sfComplete(s)) return null; // neue Runde erst, wenn alle 4 Würfe aller Runden eingetragen sind s.rounds++; s.players.forEach(p => { p.throws = sfNormThrows(p.throws, s.rounds); }); break;
     case 'sfRemoveRound': if (s.rounds <= 1) return null; s.rounds--; s.players.forEach(p => { p.throws = sfNormThrows(p.throws, s.rounds); }); break;
     case 'sfSetThrow': {
       const p = sfPlayer(op.id); if (!p) return null;
@@ -1801,6 +1801,9 @@ function handle(req, res) {
       }
       if (body.op.type === 'saveGame' && me.role !== 'admin' && throwsUnequal(db.sheet)) {
         return send(res, 422, { error: 'Ungleiche Wurf-Anzahl – nur ein Admin kann ein solches Spiel speichern.' });
+      }
+      if (body.op.type === 'sfAddRound' && !sfComplete(db.sf)) {
+        return send(res, 422, { error: '17+4: Erst alle 4 Würfe jeder Runde eintragen.' });
       }
       if (body.op.type === 'sfClose' && !sfComplete(db.sf)) {
         return send(res, 422, { error: '17+4: Bitte zuerst alle Felder ausfüllen.' });
