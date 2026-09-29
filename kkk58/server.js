@@ -427,6 +427,10 @@ function normTime(v) {
   if (h > 23 || mi > 59) return null;
   return String(h).padStart(2, '0') + ':' + String(mi).padStart(2, '0');
 }
+function normSkip(v) {
+  if (!Array.isArray(v)) return [];
+  return Array.from(new Set(v.map(normDate).filter(Boolean))).sort().slice(0, 500);
+}
 function normEvent(src) {
   const repeat = normEventRepeat(src && src.repeat);
   const pid = (src && src.placeId != null && src.placeId !== '') ? Number(src.placeId) : null;
@@ -446,7 +450,9 @@ function normEvent(src) {
     startTime,
     endTime,
     repeat,
-    until: repeat === 'none' ? null : normDate(src && src.until)
+    until: repeat === 'none' ? null : normDate(src && src.until),
+    // Ausfall-Tage einer Serie (JJJJ-MM-TT): Vorkommen an diesen Tagen finden nicht statt.
+    skip: repeat === 'none' ? [] : normSkip(src && src.skip)
   };
 }
 // Verknüpften Kegelort prüfen und Namens-Snapshot aktualisieren; unbekannte Referenz wird verworfen.
@@ -929,6 +935,7 @@ function describeOp(op, ctx) {
     case 'addEvent': return 'Termin angelegt: ' + (op.event ? evText(op.event) : '');
     case 'updateEvent': { const n = op.event ? evText(op.event) : ''; return 'Termin bearbeitet: ' + n + was(ctx.name, n); }
     case 'removeEvent': return 'Termin gelöscht: ' + (ctx.name || '');
+    case 'skipEventDate': return (op.skip ? 'Termin fällt aus: ' : 'Termin findet wieder statt: ') + fmtD(op.date) + (op.event && op.event.text ? ' – ' + op.event.text : '');
     case 'addPoll': return 'Abstimmung erstellt: ' + (op.poll ? quoteDe(op.poll.question) : '');
     case 'votePoll': return 'Abgestimmt: ' + (op.poll ? quoteDe(op.poll.question) : '') + ' (' + (op.choice === 'yes' ? 'Ja' : 'Nein') + ')';
     case 'closePoll': return 'Abstimmung beendet: ' + (op.poll ? quoteDe(op.poll.question) : '');
@@ -1527,8 +1534,18 @@ function applyOp(op, user) {
       const cur = db.events.find(x => x.id === Number(op.id)); if (!cur) return null;
       const e = normEvent(Object.assign({}, op.event, { id: cur.id })); if (!e.date || !e.text) return null;
       resolveEventPlace(e);
-      cur.date = e.date; cur.text = e.text; cur.place = e.place; cur.placeId = e.placeId; cur.placeName = e.placeName; cur.startTime = e.startTime; cur.endTime = e.endTime; cur.repeat = e.repeat; cur.until = e.until;
+      cur.date = e.date; cur.text = e.text; cur.place = e.place; cur.placeId = e.placeId; cur.placeName = e.placeName; cur.startTime = e.startTime; cur.endTime = e.endTime; cur.repeat = e.repeat; cur.until = e.until; cur.skip = e.repeat === 'none' ? [] : (Array.isArray(op.event && op.event.skip) ? e.skip : normSkip(cur.skip));
       return { type: 'updateEvent', id: cur.id, event: cur };
+    }
+    case 'skipEventDate': {
+      // Einzelnes Vorkommen einer Serie absagen (skip=true) oder wieder einplanen (skip=false)
+      if (!canManage(user.role)) return null;
+      const cur = db.events.find(x => x.id === Number(op.id)); if (!cur || cur.repeat === 'none') return null;
+      const d = normDate(op.date); if (!d || d < cur.date || (cur.until && d > cur.until)) return null;
+      const set = new Set(normSkip(cur.skip));
+      if (op.skip === false) { if (!set.delete(d)) return null; } else { if (set.has(d)) return null; set.add(d); }
+      cur.skip = normSkip(Array.from(set));
+      return { type: 'skipEventDate', id: cur.id, date: d, skip: op.skip !== false, event: cur };
     }
     case 'removeEvent': {
       if (!canManage(user.role)) return null;

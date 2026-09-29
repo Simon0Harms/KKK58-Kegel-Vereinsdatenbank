@@ -360,6 +360,8 @@
   .calbadge.bd{background:#fbe7d1;color:#8a4b0d}
   .calbadge.rep{background:#e3edf9;color:#2a5580}
   .calbadge.today{background:#1d6b57;color:#fff;margin-left:4px}
+  .calbadge.off{background:#f6dcdc;color:#8a1f1f;margin-left:4px}
+  tr.caloff td.dtext .caltxt,tr.caloff td.ddate{text-decoration:line-through;opacity:.6}
   .calplace{color:var(--muted);font-size:.85em;white-space:nowrap}
   .polllist{display:flex;flex-direction:column;gap:12px}
   .pollcard{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px}
@@ -1408,6 +1410,7 @@
       case 'updateDevelop': { const i=develop.findIndex(d=>d.id===op.id); if(i>=0 && op.entry) develop[i]=op.entry; renderDevelop(); return; }
       case 'removeDevelop': develop=develop.filter(d=>d.id!==op.id); renderDevelop(); return;
       case 'addEvent': if(op.event && !events.some(e=>e.id===op.event.id)) events.push(op.event); renderCal(); renderPlaceSuggest(); return;
+      case 'skipEventDate':
       case 'updateEvent': { const i=events.findIndex(e=>e.id===op.id); if(i>=0 && op.event) events[i]=op.event; renderCal(); renderPlaceSuggest(); return; }
       case 'removeEvent': events=events.filter(e=>e.id!==op.id); renderCal(); renderPlaceSuggest(); return;
       case 'addPoll': case 'votePoll': case 'closePoll': { if(op.poll){ const i=polls.findIndex(p=>p.id===op.poll.id); if(i>=0)polls[i]=op.poll; else polls.push(op.poll); } renderPolls(); return; }
@@ -1929,7 +1932,7 @@
     const hide=()=>{ box.classList.add("hidden"); box.innerHTML=""; };
     if(!state||!me){ hide(); return; }
     const todayY=toYMD(calToday());
-    const occ=calOccurrences().find(o=>o.kind==="event"&&o.date===todayY&&o.placeId!=null&&places.some(p=>p.id===o.placeId));
+    const occ=calOccurrences().find(o=>o.kind==="event"&&!o.cancelled&&o.date===todayY&&o.placeId!=null&&places.some(p=>p.id===o.placeId));
     if(!occ||state.placeId===occ.placeId){ hide(); return; }
     const pl=places.find(p=>p.id===occ.placeId); if(!pl){ hide(); return; }
     const addr=pl.address?'<span class="psaddr">📍 '+esc(pl.address)+'</span>':'';
@@ -2075,8 +2078,9 @@
       }
       let cur=new Date(start), guard=0;
       while(cur<today && guard<6000){ const nx=stepRepeat(cur,ev.repeat); if(!nx)break; cur=nx; guard++; }
+      const skip=Array.isArray(ev.skip)?ev.skip:[];
       while(cur<=horizon && (!until||cur<=until) && guard<6000){
-        out.push({date:toYMD(cur),d:new Date(cur),text:ev.text,place:plbl,placeId:pid,kind:"event",repeat:ev.repeat,eid:ev.id,startTime:ev.startTime||null,endTime:ev.endTime||null});
+        out.push({cancelled:skip.indexOf(toYMD(cur))!==-1,date:toYMD(cur),d:new Date(cur),text:ev.text,place:plbl,placeId:pid,kind:"event",repeat:ev.repeat,eid:ev.id,startTime:ev.startTime||null,endTime:ev.endTime||null});
         const nx=stepRepeat(cur,ev.repeat); if(!nx)break; cur=nx; guard++;
       }
     });
@@ -2109,13 +2113,19 @@
         const badge=o.kind==="birthday"?'<span class="calbadge bd">Geburtstag</span>':(o.repeat!=="none"?'<span class="calbadge rep">'+REPEAT_LABEL[o.repeat]+'</span>':'');
         const place=o.place?' <span class="calplace">📍 '+esc(o.place)+'</span>':'';
         const dl=o.kind==="event"?'<button class="btn ghost sm" type="button" title="'+(o.repeat!=="none"?"Komplette Terminreihe als iCal (.ics) herunterladen":"Diesen Termin als iCal (.ics) herunterladen")+'" data-caical="'+o.eid+'">⬇ iCal'+(o.repeat!=="none"?" (Reihe)":"")+'</button>':'';
-        return '<tr'+(isToday?' class="caltoday"':'')+'>'
+        const off=o.cancelled?' <span class="calbadge off">fällt aus</span>':'';
+        const tog=(manage&&o.kind==="event"&&o.repeat!=="none")?' <button class="btn '+(o.cancelled?'':'warn ')+'sm" type="button" data-caskip="'+o.eid+'" data-caskipd="'+o.date+'" data-caskipv="'+(o.cancelled?'0':'1')+'" title="'+(o.cancelled?'Dieses Vorkommen wieder stattfinden lassen':'Nur dieses Vorkommen der Serie absagen')+'">'+(o.cancelled?'↺ Findet statt':'✕ Fällt aus')+'</button>':'';
+        return '<tr'+((isToday||o.cancelled)?' class="'+(isToday?'caltoday':'')+(o.cancelled?' caloff':'')+'"':'')+'>'
           +'<td class="ddate" style="white-space:nowrap">'+WDAY[o.d.getDay()]+' '+esc(fmtLeft(o.date))+(fmtEvTime(o)?' <span class="muted2">'+esc(fmtEvTime(o))+'</span>':'')+(isToday?' <span class="calbadge today">heute</span>':'')+'</td>'
-          +'<td class="dtext">'+esc(o.text)+' '+badge+place+'</td>'
-          +'<td class="tactions">'+dl+'</td></tr>';
+          +'<td class="dtext"><span class="caltxt">'+esc(o.text)+'</span> '+badge+off+place+'</td>'
+          +'<td class="tactions">'+dl+tog+'</td></tr>';
       }).join("");
       box.innerHTML='<div class="tablewrap"><table class="triptable"><thead><tr><th>Datum</th><th>Beschreibung</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
       box.querySelectorAll('[data-caical]').forEach(b=>b.addEventListener("click",e=>{e.preventDefault();downloadEventIcal(Number(b.dataset.caical));}));
+      box.querySelectorAll('[data-caskip]').forEach(b=>b.addEventListener("click",e=>{e.preventDefault();
+        const sk=b.dataset.caskipv==="1", d=b.dataset.caskipd;
+        if(sk&&!confirm('Termin am '+fmtLeft(d)+' absagen? Die restliche Serie bleibt bestehen.'))return;
+        opStruct({type:'skipEventDate',id:Number(b.dataset.caskip),date:d,skip:sk}); }));
     }
     renderCalManage(manage);
   }
@@ -2127,7 +2137,7 @@
     const rows=list.map(e=>'<tr>'
       +'<td class="ddate" style="white-space:nowrap">'+esc(fmtLeft(e.date))+(fmtEvTime(e)?'<br><span class="muted2">'+esc(fmtEvTime(e))+'</span>':' <span class="muted2">ganztägig</span>')+'</td>'
       +'<td class="dtext">'+esc(e.text)+((evPlaceLabel(e))?' <span class="calplace">📍 '+esc(evPlaceLabel(e))+'</span>':'')+'</td>'
-      +'<td class="dcount">'+(e.repeat==="none"?'<span class="muted2">einmalig</span>':esc(REPEAT_LABEL[e.repeat])+(e.until?' bis '+esc(fmtLeft(e.until)):''))+'</td>'
+      +'<td class="dcount">'+(e.repeat==="none"?'<span class="muted2">einmalig</span>':esc(REPEAT_LABEL[e.repeat])+(e.until?' bis '+esc(fmtLeft(e.until)):'')+((e.skip&&e.skip.length)?'<br><span class="muted2">fällt aus: '+e.skip.map(d=>esc(fmtLeft(d))).join(', ')+'</span>':''))+'</td>'
       +'<td class="tactions"><button class="btn ghost sm" type="button" title="'+(e.repeat!=="none"?"Komplette Terminreihe als iCal (.ics) herunterladen":"Als iCal (.ics) herunterladen")+'" data-caical="'+e.id+'">⬇ iCal'+(e.repeat!=="none"?" (Reihe)":"")+'</button> <button class="btn sm" type="button" data-caedit="'+e.id+'">Bearbeiten</button> <button class="btn warn sm" type="button" data-cadel="'+e.id+'">Löschen</button></td>'
       +'</tr>').join("");
     box.innerHTML='<h3 class="calh3">Termine verwalten</h3><div class="tablewrap"><table class="triptable"><thead><tr><th>Datum</th><th>Beschreibung</th><th>Wiederholung</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
@@ -2227,7 +2237,9 @@
     const _lp=evPlace(ev); const _pn=_lp?_lp.name:((ev.placeId!=null&&ev.placeName)?ev.placeName:"");
     const loc=[_pn,evPlaceAddress(ev),ev.place].filter(Boolean).join(", ");
     if(loc)v+="LOCATION:"+icsEsc(loc)+"\r\n";
-    const rr=icsRRule(ev); if(rr)v+=rr+"\r\n";
+    const rr=icsRRule(ev); if(rr){ v+=rr+"\r\n";
+      // Ausfall-Tage als EXDATE (Typ passend zu DTSTART)
+      (ev.skip||[]).forEach(d=>{ v+=ev.startTime?("EXDATE:"+icsDate(d)+"T"+icsTime(ev.startTime)+"\r\n"):("EXDATE;VALUE=DATE:"+icsDate(d)+"\r\n"); }); }
     return v+"END:VEVENT\r\n";
   }
   function icsBirthdayVevent(r){
