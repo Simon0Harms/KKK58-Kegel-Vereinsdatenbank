@@ -452,8 +452,21 @@ function normEvent(src) {
     repeat,
     until: repeat === 'none' ? null : normDate(src && src.until),
     // Ausfall-Tage einer Serie (JJJJ-MM-TT): Vorkommen an diesen Tagen finden nicht statt.
-    skip: repeat === 'none' ? [] : normSkip(src && src.skip)
+    skip: repeat === 'none' ? [] : normSkip(src && src.skip),
+    // Abweichungen einzelner Vorkommen (z. B. anderer Kegelort/andere Uhrzeit):
+    // { "JJJJ-MM-TT": { text, place, placeId, placeName, startTime, endTime } }
+    overrides: repeat === 'none' ? {} : normOverrides(src && src.overrides)
   };
+}
+function normOverride(o) {
+  const x = normEvent(Object.assign({}, o, { date: '2000-01-01', repeat: 'none' }));
+  return { text: x.text, place: x.place, placeId: x.placeId, placeName: x.placeName, startTime: x.startTime, endTime: x.endTime };
+}
+function normOverrides(v) {
+  const out = {};
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return out;
+  Object.keys(v).sort().slice(0, 500).forEach(k => { const d = normDate(k); if (d && v[k] && typeof v[k] === 'object') out[d] = normOverride(v[k]); });
+  return out;
 }
 // Verknüpften Kegelort prüfen und Namens-Snapshot aktualisieren; unbekannte Referenz wird verworfen.
 function resolveEventPlace(e) {
@@ -935,6 +948,7 @@ function describeOp(op, ctx) {
     case 'addEvent': return 'Termin angelegt: ' + (op.event ? evText(op.event) : '');
     case 'updateEvent': { const n = op.event ? evText(op.event) : ''; return 'Termin bearbeitet: ' + n + was(ctx.name, n); }
     case 'removeEvent': return 'Termin gelöscht: ' + (ctx.name || '');
+    case 'setEventOverride': return (op.override ? 'Einzeltermin geändert: ' + fmtD(op.date) + (op.override.startTime ? ' ' + op.override.startTime : '') + ' – ' + op.override.text + ((op.override.placeName || op.override.place) ? ' (' + (op.override.placeName || op.override.place) + ')' : '') : 'Änderung am Einzeltermin zurückgenommen: ' + fmtD(op.date) + (op.event && op.event.text ? ' – ' + op.event.text : ''));
     case 'skipEventDate': return (op.skip ? 'Termin fällt aus: ' : 'Termin findet wieder statt: ') + fmtD(op.date) + (op.event && op.event.text ? ' – ' + op.event.text : '');
     case 'addPoll': return 'Abstimmung erstellt: ' + (op.poll ? quoteDe(op.poll.question) : '');
     case 'votePoll': return 'Abgestimmt: ' + (op.poll ? quoteDe(op.poll.question) : '') + ' (' + (op.choice === 'yes' ? 'Ja' : 'Nein') + ')';
@@ -1535,6 +1549,7 @@ function applyOp(op, user) {
       const e = normEvent(Object.assign({}, op.event, { id: cur.id })); if (!e.date || !e.text) return null;
       resolveEventPlace(e);
       cur.date = e.date; cur.text = e.text; cur.place = e.place; cur.placeId = e.placeId; cur.placeName = e.placeName; cur.startTime = e.startTime; cur.endTime = e.endTime; cur.repeat = e.repeat; cur.until = e.until; cur.skip = e.repeat === 'none' ? [] : (Array.isArray(op.event && op.event.skip) ? e.skip : normSkip(cur.skip));
+      cur.overrides = e.repeat === 'none' ? {} : ((op.event && op.event.overrides) ? e.overrides : normOverrides(cur.overrides));
       return { type: 'updateEvent', id: cur.id, event: cur };
     }
     case 'skipEventDate': {
@@ -1546,6 +1561,22 @@ function applyOp(op, user) {
       if (op.skip === false) { if (!set.delete(d)) return null; } else { if (set.has(d)) return null; set.add(d); }
       cur.skip = normSkip(Array.from(set));
       return { type: 'skipEventDate', id: cur.id, date: d, skip: op.skip !== false, event: cur };
+    }
+    case 'setEventOverride': {
+      // Einzelnes Vorkommen einer Serie abweichend setzen (override-Objekt) oder Abweichung entfernen (null)
+      if (!canManage(user.role)) return null;
+      const cur = db.events.find(x => x.id === Number(op.id)); if (!cur || cur.repeat === 'none') return null;
+      const d = normDate(op.date); if (!d || d < cur.date || (cur.until && d > cur.until)) return null;
+      const ov = normOverrides(cur.overrides);
+      if (op.override == null) { if (!ov[d]) return null; delete ov[d]; }
+      else {
+        const o = normOverride(op.override); if (!o.text) return null;
+        if (o.placeId != null) { const pl = placeById(o.placeId); if (pl) o.placeName = pl.name; else { o.placeId = null; o.placeName = ''; } } else o.placeName = '';
+        ov[d] = o;
+        cur.skip = normSkip(cur.skip).filter(x => x !== d); // geänderter Termin findet statt
+      }
+      cur.overrides = ov;
+      return { type: 'setEventOverride', id: cur.id, date: d, override: op.override == null ? null : ov[d], event: cur };
     }
     case 'removeEvent': {
       if (!canManage(user.role)) return null;

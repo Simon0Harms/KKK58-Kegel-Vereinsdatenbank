@@ -360,6 +360,7 @@
   .calbadge.bd{background:#fbe7d1;color:#8a4b0d}
   .calbadge.rep{background:#e3edf9;color:#2a5580}
   .calbadge.today{background:#1d6b57;color:#fff;margin-left:4px}
+  .calbadge.chg{background:#fff1c2;color:#7a5a00;margin-left:4px}
   .calbadge.off{background:#f6dcdc;color:#8a1f1f;margin-left:4px}
   tr.caloff td.dtext .caltxt,tr.caloff td.ddate{text-decoration:line-through;opacity:.6}
   .calplace{color:var(--muted);font-size:.85em;white-space:nowrap}
@@ -1033,6 +1034,7 @@
     <div class="ddrow">
       <button class="btn prim" id="ca_save" type="button">Speichern</button>
       <button class="btn" id="ca_cancel" type="button">Abbrechen</button>
+      <button class="btn warn hidden" id="ca_ovdel" type="button">Abweichung entfernen</button>
     </div>
   </div>
 </div>
@@ -1410,7 +1412,7 @@
       case 'updateDevelop': { const i=develop.findIndex(d=>d.id===op.id); if(i>=0 && op.entry) develop[i]=op.entry; renderDevelop(); return; }
       case 'removeDevelop': develop=develop.filter(d=>d.id!==op.id); renderDevelop(); return;
       case 'addEvent': if(op.event && !events.some(e=>e.id===op.event.id)) events.push(op.event); renderCal(); renderPlaceSuggest(); return;
-      case 'skipEventDate':
+      case 'skipEventDate': case 'setEventOverride':
       case 'updateEvent': { const i=events.findIndex(e=>e.id===op.id); if(i>=0 && op.event) events[i]=op.event; renderCal(); renderPlaceSuggest(); return; }
       case 'removeEvent': events=events.filter(e=>e.id!==op.id); renderCal(); renderPlaceSuggest(); return;
       case 'addPoll': case 'votePoll': case 'closePoll': { if(op.poll){ const i=polls.findIndex(p=>p.id===op.poll.id); if(i>=0)polls[i]=op.poll; else polls.push(op.poll); } renderPolls(); return; }
@@ -2078,9 +2080,11 @@
       }
       let cur=new Date(start), guard=0;
       while(cur<today && guard<6000){ const nx=stepRepeat(cur,ev.repeat); if(!nx)break; cur=nx; guard++; }
-      const skip=Array.isArray(ev.skip)?ev.skip:[];
+      const skip=Array.isArray(ev.skip)?ev.skip:[]; const ovs=ev.overrides||{};
       while(cur<=horizon && (!until||cur<=until) && guard<6000){
-        out.push({cancelled:skip.indexOf(toYMD(cur))!==-1,date:toYMD(cur),d:new Date(cur),text:ev.text,place:plbl,placeId:pid,kind:"event",repeat:ev.repeat,eid:ev.id,startTime:ev.startTime||null,endTime:ev.endTime||null});
+        const ymd=toYMD(cur), ov=ovs[ymd];
+        if(ov) out.push({changed:true,date:ymd,d:new Date(cur),text:ov.text,place:evPlaceLabel(ov),placeId:(ov.placeId!=null?ov.placeId:null),kind:"event",repeat:ev.repeat,eid:ev.id,startTime:ov.startTime||null,endTime:ov.endTime||null});
+        else out.push({cancelled:skip.indexOf(ymd)!==-1,date:ymd,d:new Date(cur),text:ev.text,place:plbl,placeId:pid,kind:"event",repeat:ev.repeat,eid:ev.id,startTime:ev.startTime||null,endTime:ev.endTime||null});
         const nx=stepRepeat(cur,ev.repeat); if(!nx)break; cur=nx; guard++;
       }
     });
@@ -2113,12 +2117,13 @@
         const badge=o.kind==="birthday"?'<span class="calbadge bd">Geburtstag</span>':(o.repeat!=="none"?'<span class="calbadge rep">'+REPEAT_LABEL[o.repeat]+'</span>':'');
         const place=o.place?' <span class="calplace">📍 '+esc(o.place)+'</span>':'';
         const dl=o.kind==="event"?'<button class="btn ghost sm" type="button" title="'+(o.repeat!=="none"?"Komplette Terminreihe als iCal (.ics) herunterladen":"Diesen Termin als iCal (.ics) herunterladen")+'" data-caical="'+o.eid+'">⬇ iCal'+(o.repeat!=="none"?" (Reihe)":"")+'</button>':'';
-        const off=o.cancelled?' <span class="calbadge off">fällt aus</span>':'';
+        const off=o.cancelled?' <span class="calbadge off">fällt aus</span>':(o.changed?' <span class="calbadge chg">geändert</span>':'');
+        const chg=(manage&&o.kind==="event"&&o.repeat!=="none"&&!o.cancelled)?' <button class="btn sm" type="button" data-caocc="'+o.eid+'" data-caoccd="'+o.date+'" title="Nur diesen Termin der Serie ändern (z. B. anderer Kegelort)">✎ Nur diesen Tag</button>':'';
         const tog=(manage&&o.kind==="event"&&o.repeat!=="none")?' <button class="btn '+(o.cancelled?'':'warn ')+'sm" type="button" data-caskip="'+o.eid+'" data-caskipd="'+o.date+'" data-caskipv="'+(o.cancelled?'0':'1')+'" title="'+(o.cancelled?'Dieses Vorkommen wieder stattfinden lassen':'Nur dieses Vorkommen der Serie absagen')+'">'+(o.cancelled?'↺ Findet statt':'✕ Fällt aus')+'</button>':'';
         return '<tr'+((isToday||o.cancelled)?' class="'+(isToday?'caltoday':'')+(o.cancelled?' caloff':'')+'"':'')+'>'
           +'<td class="ddate" style="white-space:nowrap">'+WDAY[o.d.getDay()]+' '+esc(fmtLeft(o.date))+(fmtEvTime(o)?' <span class="muted2">'+esc(fmtEvTime(o))+'</span>':'')+(isToday?' <span class="calbadge today">heute</span>':'')+'</td>'
           +'<td class="dtext"><span class="caltxt">'+esc(o.text)+'</span> '+badge+off+place+'</td>'
-          +'<td class="tactions">'+dl+tog+'</td></tr>';
+          +'<td class="tactions">'+dl+chg+(o.changed?'':tog)+'</td></tr>';
       }).join("");
       box.innerHTML='<div class="tablewrap"><table class="triptable"><thead><tr><th>Datum</th><th>Beschreibung</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
       box.querySelectorAll('[data-caical]').forEach(b=>b.addEventListener("click",e=>{e.preventDefault();downloadEventIcal(Number(b.dataset.caical));}));
@@ -2126,6 +2131,7 @@
         const sk=b.dataset.caskipv==="1", d=b.dataset.caskipd;
         if(sk&&!confirm('Termin am '+fmtLeft(d)+' absagen? Die restliche Serie bleibt bestehen.'))return;
         opStruct({type:'skipEventDate',id:Number(b.dataset.caskip),date:d,skip:sk}); }));
+      box.querySelectorAll('[data-caocc]').forEach(b=>b.addEventListener("click",e=>{e.preventDefault(); openCalOcc(Number(b.dataset.caocc),b.dataset.caoccd); }));
     }
     renderCalManage(manage);
   }
@@ -2137,7 +2143,7 @@
     const rows=list.map(e=>'<tr>'
       +'<td class="ddate" style="white-space:nowrap">'+esc(fmtLeft(e.date))+(fmtEvTime(e)?'<br><span class="muted2">'+esc(fmtEvTime(e))+'</span>':' <span class="muted2">ganztägig</span>')+'</td>'
       +'<td class="dtext">'+esc(e.text)+((evPlaceLabel(e))?' <span class="calplace">📍 '+esc(evPlaceLabel(e))+'</span>':'')+'</td>'
-      +'<td class="dcount">'+(e.repeat==="none"?'<span class="muted2">einmalig</span>':esc(REPEAT_LABEL[e.repeat])+(e.until?' bis '+esc(fmtLeft(e.until)):'')+((e.skip&&e.skip.length)?'<br><span class="muted2">fällt aus: '+e.skip.map(d=>esc(fmtLeft(d))).join(', ')+'</span>':''))+'</td>'
+      +'<td class="dcount">'+(e.repeat==="none"?'<span class="muted2">einmalig</span>':esc(REPEAT_LABEL[e.repeat])+(e.until?' bis '+esc(fmtLeft(e.until)):'')+((e.skip&&e.skip.length)?'<br><span class="muted2">fällt aus: '+e.skip.map(d=>esc(fmtLeft(d))).join(', ')+'</span>':'')+((e.overrides&&Object.keys(e.overrides).length)?'<br><span class="muted2">geändert: '+Object.keys(e.overrides).sort().map(d=>esc(fmtLeft(d))).join(', ')+'</span>':''))+'</td>'
       +'<td class="tactions"><button class="btn ghost sm" type="button" title="'+(e.repeat!=="none"?"Komplette Terminreihe als iCal (.ics) herunterladen":"Als iCal (.ics) herunterladen")+'" data-caical="'+e.id+'">⬇ iCal'+(e.repeat!=="none"?" (Reihe)":"")+'</button> <button class="btn sm" type="button" data-caedit="'+e.id+'">Bearbeiten</button> <button class="btn warn sm" type="button" data-cadel="'+e.id+'">Löschen</button></td>'
       +'</tr>').join("");
     box.innerHTML='<h3 class="calh3">Termine verwalten</h3><div class="tablewrap"><table class="triptable"><thead><tr><th>Datum</th><th>Beschreibung</th><th>Wiederholung</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
@@ -2159,7 +2165,22 @@
     active.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(p=>{ opts+='<option value="'+p.id+'">'+esc(p.name)+'</option>'; });
     if(curP) opts+='<option value="'+curP.id+'">'+esc(curP.name)+' (inaktiv)</option>';
     sel.innerHTML=opts; sel.value=(cur!=null?String(cur):""); }
+  // Einzeltermin-Modus: Dialog bearbeitet nur ein Vorkommen einer Serie (Datum/Wiederholung gesperrt)
+  let calOcc=null;
+  function calOccUi(on){ $("ca_date").disabled=on; $("ca_repeat").disabled=on; $("ca_repeat").closest(".fld").style.display=on?"none":"";
+    if(on)$("ca_untilwrap").style.display="none"; }
+  function openCalOcc(id,date){ if(!(me&&effManage()))return; const ev=events.find(x=>x.id===id); if(!ev)return;
+    const ov=(ev.overrides||{})[date]; const src=ov||ev;
+    openCalEdit(id); calEditId=null; calOcc={id,date};
+    $("ca_title").textContent="Nur Termin am "+fmtLeft(date)+" ändern";
+    $("ca_date").value=date; calOccUi(true);
+    $("ca_allday").checked=!src.startTime; $("ca_start").value=src.startTime||""; $("ca_end").value=src.endTime||"";
+    $("ca_timewrap").style.display=src.startTime?"flex":"none";
+    $("ca_text").value=src.text||""; fillPlaceSelect($("ca_placeid"), src.placeId!=null?src.placeId:null); $("ca_place").value=src.place||"";
+    $("ca_ovdel").classList.toggle("hidden",!ov);
+  }
   function openCalEdit(id){ if(!(me&&effManage()))return; const ev=id!=null?events.find(x=>x.id===id):null; calEditId=id!=null?id:null;
+    calOcc=null; calOccUi(false); $("ca_ovdel").classList.add("hidden");
     $("ca_title").textContent=ev?"Termin bearbeiten":"Neuer Termin"; $("ca_err").textContent="";
     $("ca_date").value=ev?(ev.date||""):toYMD(calToday());
     const allday=ev?!ev.startTime:true;
@@ -2175,7 +2196,7 @@
     $("ca_untilwrap").style.display=($("ca_repeat").value!=="none")?"":"none";
     $("caldlg").classList.remove("hidden"); setTimeout(()=>$("ca_date").focus(),50);
   }
-  function closeCalEdit(){ $("caldlg").classList.add("hidden"); calEditId=null; }
+  function closeCalEdit(){ $("caldlg").classList.add("hidden"); calEditId=null; calOcc=null; calOccUi(false); }
   function saveCalEdit(){ if(!(me&&effManage())){closeCalEdit();return;}
     $("ca_err").textContent="";
     const date=$("ca_date").value; if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ $("ca_err").textContent="Bitte ein gültiges Datum wählen."; return; }
@@ -2191,6 +2212,7 @@
       if(en){ if(!/^\d{2}:\d{2}$/.test(en)){ $("ca_err").textContent="Enduhrzeit ungültig."; return; }
         if(en<=startTime){ $("ca_err").textContent="Die Enduhrzeit muss nach der Startuhrzeit liegen."; return; } endTime=en; }
     }
+    if(calOcc){ opStruct({type:'setEventOverride',id:calOcc.id,date:calOcc.date,override:{text,place,placeId,startTime,endTime}}); closeCalEdit(); toast("Einzeltermin geändert."); return; }
     const repeat=$("ca_repeat").value; const untilRaw=$("ca_until").value; let until=null;
     if(repeat!=="none" && untilRaw){ if(!/^\d{4}-\d{2}-\d{2}$/.test(untilRaw)){ $("ca_err").textContent="Enddatum ungültig."; return; }
       if(untilRaw<date){ $("ca_err").textContent="Das Enddatum darf nicht vor dem Startdatum liegen."; return; } until=untilRaw; }
@@ -2205,6 +2227,8 @@
   $("ca_allday").addEventListener("change",()=>{ const on=!$("ca_allday").checked; $("ca_timewrap").style.display=on?"flex":"none"; if(on&&!$("ca_start").value)$("ca_start").value="19:00"; });
   $("ca_save").addEventListener("click",saveCalEdit);
   $("ca_cancel").addEventListener("click",closeCalEdit);
+  $("ca_ovdel").addEventListener("click",()=>{ if(!calOcc)return; if(!confirm("Abweichung entfernen? Der Termin gilt dann wieder wie die Serie."))return;
+    opStruct({type:'setEventOverride',id:calOcc.id,date:calOcc.date,override:null}); closeCalEdit(); toast("Abweichung entfernt."); });
   $("caldlg").addEventListener("click",e=>{ if(e.target===$("caldlg"))closeCalEdit(); });
 
   // iCal / .ics-Export (abhängigkeitsfrei; Herunterladen dürfen alle Angemeldeten, auch „beschränkt").
@@ -2237,10 +2261,16 @@
     const _lp=evPlace(ev); const _pn=_lp?_lp.name:((ev.placeId!=null&&ev.placeName)?ev.placeName:"");
     const loc=[_pn,evPlaceAddress(ev),ev.place].filter(Boolean).join(", ");
     if(loc)v+="LOCATION:"+icsEsc(loc)+"\r\n";
-    const rr=icsRRule(ev); if(rr){ v+=rr+"\r\n";
+    const rr=icsRRule(ev); let ex="";
+    // Geänderte Einzeltermine als eigene VEVENTs mit gleicher UID und RECURRENCE-ID
+    if(rr) Object.keys(ev.overrides||{}).sort().forEach(d=>{ const o=ev.overrides[d]; if(ev.until&&d>ev.until)return;
+      const oe=Object.assign({},o,{id:ev.id,date:d,repeat:"none",until:null,skip:[],overrides:{}});
+      const rid=ev.startTime?("RECURRENCE-ID:"+icsDate(d)+"T"+icsTime(ev.startTime)):("RECURRENCE-ID;VALUE=DATE:"+icsDate(d));
+      ex+=icsVevent(oe).replace("END:VEVENT\r\n",rid+"\r\nEND:VEVENT\r\n"); });
+    if(rr){ v+=rr+"\r\n";
       // Ausfall-Tage als EXDATE (Typ passend zu DTSTART)
       (ev.skip||[]).forEach(d=>{ v+=ev.startTime?("EXDATE:"+icsDate(d)+"T"+icsTime(ev.startTime)+"\r\n"):("EXDATE;VALUE=DATE:"+icsDate(d)+"\r\n"); }); }
-    return v+"END:VEVENT\r\n";
+    return v+"END:VEVENT\r\n"+ex;
   }
   function icsBirthdayVevent(r){
     let v="BEGIN:VEVENT\r\n";
