@@ -533,6 +533,7 @@ function loadDb() {
 let saveTimer = null;
 function saveDb() { clearTimeout(saveTimer); saveTimer = setTimeout(flushDb, 250); }
 function flushDb() {
+  if (db && Array.isArray(db.ledger)) recalcOpenings();
   clearTimeout(saveTimer); saveTimer = null;
   const tmp = DB_FILE + '.tmp';
   try { fs.writeFileSync(tmp, JSON.stringify(db), { mode: 0o600 }); fs.renameSync(tmp, DB_FILE); }
@@ -1131,8 +1132,24 @@ function addLedger(kind, rosterId, amount, note, by, date, meta) {
   if (meta) e.meta = meta;
   db.ledger.push(e); return e;
 }
-function personBalance(rosterId) { let s = 0; for (const e of db.ledger) if (e.rosterId === rosterId) s += e.amount; return s; }
-function cashOnHand() { let c = 0; for (const e of db.ledger) { if (e.kind === 'openingCash') c += e.amount; else if (e.kind === 'payment') c += -e.amount; else if (e.kind === 'expense') c -= e.amount; } return c; }
+// Anfangsbestände mit meta.target sind Stichtags-Salden: der Saldo zum Zeitpunkt der Eintragung
+// ist genau target. Der gebuchte Betrag wird daher immer neu aus allen davor liegenden Buchungen
+// berechnet – so ändern spätere Stornos/Nachträge vor dem Stichtag den Saldo nicht mehr.
+// "Davor" = früheres Datum, oder gleiches Datum und früher erfasst (kleinere id).
+function ledgerBefore(a, b) { return a.date < b.date || (a.date === b.date && a.id < b.id); }
+function cashEffect(e) { if (e.kind === 'payment') return -e.amount; if (e.kind === 'expense') return -e.amount; return 0; }
+function recalcOpenings() {
+  for (const o of db.ledger) {
+    if (!o.meta || typeof o.meta.target !== 'number') continue;
+    let prior = 0;
+    if (o.kind === 'opening') { for (const e of db.ledger) if (e !== o && e.rosterId === o.rosterId && ledgerBefore(e, o)) prior += e.amount; }
+    else if (o.kind === 'openingCash') { for (const e of db.ledger) if (e !== o && ledgerBefore(e, o)) prior += cashEffect(e); }
+    else continue;
+    o.amount = o.meta.target - prior;
+  }
+}
+function personBalance(rosterId) { recalcOpenings(); let s = 0; for (const e of db.ledger) if (e.rosterId === rosterId) s += e.amount; return s; }
+function cashOnHand() { recalcOpenings(); let c = 0; for (const e of db.ledger) { if (e.kind === 'openingCash') c += e.amount; else if (e.kind === 'payment') c += -e.amount; else if (e.kind === 'expense') c -= e.amount; } return c; }
 // Nutzen aus Ausgaben je Person (Statistik): Ausgabe wird gleichmäßig auf ihre Begünstigten verteilt
 function expenseBenefit() {
   const acc = {};
@@ -1142,7 +1159,7 @@ function expenseBenefit() {
   }
   return acc;
 }
-function openClaimsSum() { const bal = {}; for (const e of db.ledger) if (e.rosterId != null) bal[e.rosterId] = (bal[e.rosterId] || 0) + e.amount; let s = 0; for (const k in bal) if (bal[k] > 0) s += bal[k]; return s; }
+function openClaimsSum() { recalcOpenings(); const bal = {}; for (const e of db.ledger) if (e.rosterId != null) bal[e.rosterId] = (bal[e.rosterId] || 0) + e.amount; let s = 0; for (const k in bal) if (bal[k] > 0) s += bal[k]; return s; }
 // Automatischer Monatsbeitrag: bucht für aktive, beitragspflichtige Personen jeden noch offenen Monat
 function runDues() {
   const cs = db.cashSettings; const now = curMonth();
@@ -1175,6 +1192,7 @@ function absenceSuggestions() {
   return out;
 }
 function cashOverview(mayWrite) {
+  recalcOpenings();
   if (mayWrite) runDues();
   const persons = db.roster.map(r => ({ rosterId: r.id, name: r.name, active: r.active, duesLiable: r.duesLiable !== false, balance: personBalance(r.id) }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -1188,6 +1206,7 @@ function cashOverview(mayWrite) {
 const GNC_NS = ['gnc','act','book','cd','cmdty','price','slot','split','sx','trn','ts','fs','bgt','recurrence','lot','addr','billterm','bt-days','bt-prox','cust','employee','entry','invoice','job','order','owner','taxtable','tte','vendor'];
 function gncEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;'); }
 function buildGnuCash() {
+  recalcOpenings();
   const guid = () => crypto.randomBytes(16).toString('hex');
   const z = n => String(n).padStart(2, '0');
   const dPost = ds => (/^\d{4}-\d{2}-\d{2}$/.test(ds) ? ds : todayStr()) + ' 00:00:00 +0000';
@@ -1260,6 +1279,7 @@ function fmtDT(ts) { const d = new Date(ts); const z = n => String(n).padStart(2
 // Datenbank-Export als JSON. full=false: bereinigt (ohne Zugangsdaten), für jede angemeldete Rolle.
 // full=true: vollständige Sicherung inkl. Passwort-Hashes/Salts und Einladungs-Tokens – nur für Admins.
 function buildDbExport(full, byUser) {
+  recalcOpenings();
   const snap = JSON.parse(JSON.stringify(db)); // tiefe Kopie, Original bleibt unangetastet
   if (!full) {
     // Zugangsdaten entfernen: Passwort-Hash/Salt je Konto, komplette Einladungsliste (Einmal-Login-Tokens)
@@ -1892,17 +1912,15 @@ function handle(req, res) {
     return readJson(req, body => {
       const cent = parseEuroToCent(body && body.euro); if (cent == null) return send(res, 422, { error: 'Betrag ungültig' });
       const isCash = (body && (body.rosterId == null || body.rosterId === '' || body.rosterId === 'cash'));
-      // Der eingegebene Betrag ist der Bestand zum Zeitpunkt der Eintragung (kein Zuschlag auf den
-      // bisherigen Saldo). Gebucht wird daher die Differenz zum Saldo ohne alten Anfangsbestand.
+      // Der eingegebene Betrag ist der Bestand zum Zeitpunkt der Eintragung (Stichtags-Saldo), kein
+      // Zuschlag. Der gebuchte Betrag wird von recalcOpenings() dynamisch berechnet.
       if (isCash) {
         db.ledger = db.ledger.filter(e => e.kind !== 'openingCash');
-        const delta = cent - cashOnHand();
-        if (delta !== 0) addLedger('openingCash', null, delta, 'Anfangsbestand Kasse (Stand ' + (cent / 100).toFixed(2).replace('.', ',') + ' €)', me.username, todayStr(), { target: cent });
+        addLedger('openingCash', null, 0, 'Anfangsbestand Kasse (Stand ' + (cent / 100).toFixed(2).replace('.', ',') + ' €)', me.username, todayStr(), { target: cent });
       } else {
         const rid = Number(body.rosterId); if (!db.roster.some(r => r.id === rid)) return send(res, 422, { error: 'Person nicht im Stamm' });
         db.ledger = db.ledger.filter(e => !(e.kind === 'opening' && e.rosterId === rid));
-        const delta = cent - personBalance(rid);
-        if (delta !== 0) addLedger('opening', rid, delta, 'Anfangsbestand (Stand ' + (cent / 100).toFixed(2).replace('.', ',') + ' €)', me.username, todayStr(), { target: cent });
+        addLedger('opening', rid, 0, 'Anfangsbestand (Stand ' + (cent / 100).toFixed(2).replace('.', ',') + ' €)', me.username, todayStr(), { target: cent });
       }
       flushDb(); send(res, 200, cashOverview(true));
     });

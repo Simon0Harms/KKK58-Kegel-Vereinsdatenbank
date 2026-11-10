@@ -464,8 +464,10 @@ Einzeln (außerhalb des Archivs) sind `game`-Buchungen nicht löschbar.
   `rosterId=null`, genau einer).
 - Der eingegebene Betrag ist der **Bestand zum Zeitpunkt der Eintragung**, nicht ein Zuschlag:
   Hat jemand bereits 60 € und man trägt 1000 € ein, ist der Saldo danach 1000 € (nicht 1060 €).
-  Gebucht wird intern die Differenz zum bisherigen Saldo (ohne alten Anfangsbestand); der
-  eingegebene Zielwert steht in `meta.target`. Spätere Buchungen wirken normal darauf.
+  Der Zielwert steht in `meta.target`; der gebuchte Betrag wird bei jeder Auswertung neu als
+  Differenz zu allen **davor liegenden** Buchungen berechnet (früheres Datum bzw. gleicher Tag und
+  früher erfasst). Stornos oder Nachträge vor dem Stichtag ändern den Saldo daher nicht; Buchungen
+  danach wirken normal darauf. Ein Anfangsbestand von 0 € bleibt als Stichtag erhalten.
 
 ### Zahlungen & Korrekturen
 - **Zahlung** (`payment`): Betrag > 0, mit Datum und optionaler Notiz. Reduziert den Saldo der
