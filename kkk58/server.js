@@ -1892,8 +1892,18 @@ function handle(req, res) {
     return readJson(req, body => {
       const cent = parseEuroToCent(body && body.euro); if (cent == null) return send(res, 422, { error: 'Betrag ungültig' });
       const isCash = (body && (body.rosterId == null || body.rosterId === '' || body.rosterId === 'cash'));
-      if (isCash) { db.ledger = db.ledger.filter(e => e.kind !== 'openingCash'); if (cent !== 0) addLedger('openingCash', null, cent, 'Anfangsbestand Kasse', me.username, todayStr()); }
-      else { const rid = Number(body.rosterId); if (!db.roster.some(r => r.id === rid)) return send(res, 422, { error: 'Person nicht im Stamm' }); db.ledger = db.ledger.filter(e => !(e.kind === 'opening' && e.rosterId === rid)); if (cent !== 0) addLedger('opening', rid, cent, 'Anfangsbestand', me.username, todayStr()); }
+      // Der eingegebene Betrag ist der Bestand zum Zeitpunkt der Eintragung (kein Zuschlag auf den
+      // bisherigen Saldo). Gebucht wird daher die Differenz zum Saldo ohne alten Anfangsbestand.
+      if (isCash) {
+        db.ledger = db.ledger.filter(e => e.kind !== 'openingCash');
+        const delta = cent - cashOnHand();
+        if (delta !== 0) addLedger('openingCash', null, delta, 'Anfangsbestand Kasse (Stand ' + (cent / 100).toFixed(2).replace('.', ',') + ' €)', me.username, todayStr(), { target: cent });
+      } else {
+        const rid = Number(body.rosterId); if (!db.roster.some(r => r.id === rid)) return send(res, 422, { error: 'Person nicht im Stamm' });
+        db.ledger = db.ledger.filter(e => !(e.kind === 'opening' && e.rosterId === rid));
+        const delta = cent - personBalance(rid);
+        if (delta !== 0) addLedger('opening', rid, delta, 'Anfangsbestand (Stand ' + (cent / 100).toFixed(2).replace('.', ',') + ' €)', me.username, todayStr(), { target: cent });
+      }
       flushDb(); send(res, 200, cashOverview(true));
     });
   }
