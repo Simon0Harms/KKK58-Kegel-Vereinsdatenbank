@@ -223,8 +223,42 @@ funktioniert daher auch hinter dem NPMplus-Proxy.
 
 ## 6. Update
 
-Dateien in `/opt/kkk58` ersetzen (nicht `data/`), dann
-`sudo systemctl restart kkk58`.
+Updates laufen über `kkk58/update.sh`. Es hält einen git-Checkout in `/opt/kkk58-src`
+(legt ihn beim ersten Lauf an) und überträgt daraus den Ordner `kkk58/` nach `/opt/kkk58`.
+`data/`, `*.env`, `backup/` und `matrix-store/` werden dabei **nie** überschrieben.
+
+Voraussetzung: `apt install git curl`. Einmalig einrichten (als root):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Simon0Harms/KKK58-Kegel-Vereinsdatenbank/main/kkk58/update.sh \
+  -o /usr/local/bin/kkk58-update && chmod 755 /usr/local/bin/kkk58-update
+kkk58-update
+```
+
+Danach genügt:
+
+```bash
+kkk58-update                # neuester Stand von main
+kkk58-update <tag|commit>   # bestimmter Stand (auch zum Zurückgehen)
+```
+
+Ablauf:
+
+1. Sicherung von Code, `data/` und Env-Dateien nach `/opt/kkk58/backup/kkk58-<zeit>.tar.gz`
+   (die letzten 10 bleiben erhalten).
+2. Neuen Stand übertragen; im Repo gelöschte Dateien werden auch im Ziel entfernt.
+3. Geänderte systemd-Units übernehmen (Symlink laut Abschnitt 1 oder Kopie in `/etc/systemd/system`),
+   `kkk58` neu starten und prüfen, ob `http://127.0.0.1:<PORT><BASE_PATH>/` antwortet.
+4. Erfolg: Matrix-Sidecar neu starten, falls `matrix-backup/` geändert wurde und er läuft;
+   Hinweis, wenn sich `*.env.example` geändert hat. Das Skript aktualisiert sich selbst
+   nach `/usr/local/bin/kkk58-update`.
+5. Fehlschlag: Code **und** `data/` aus der Sicherung zurückspielen (eine evtl. schon
+   migrierte `db.json` wird so rückgängig gemacht) und die alte Version starten.
+
+Pfade lassen sich über `KKK_DIR`, `KKK_SRC` und `KKK_REPO` überschreiben.
+Der Neustart trennt kurz die Live-Verbindungen; die Clients verbinden sich neu.
+Beim Rollback gehen Änderungen verloren, die zwischen Sicherung und Rollback
+geschrieben wurden (Zeitfenster: wenige Sekunden).
 
 ---
 
